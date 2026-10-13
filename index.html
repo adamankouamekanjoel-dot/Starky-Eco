@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paiement</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 420px; margin: 2rem auto; padding: 0 1rem; }
+  input, button { width: 100%; padding: .7rem; margin: .4rem 0; font-size: 1rem; box-sizing: border-box; }
+  button { background: #111; color: #fff; border: 0; border-radius: 8px; }
+  #msg { margin-top: 1rem; }
+</style>
+</head>
+<body>
+  <h2>Payer</h2>
+  <input id="label" placeholder="Produit ou service" value="Bracelet">
+  <input id="amount" type="number" min="100" placeholder="Montant en XOF" value="1500">
+  <button id="pay">Payer</button>
+  <div id="msg"></div>
+
+<script>
+const WORKER = "https://jolly-field-a7d3.wellanmarie.workers.dev";
+
+// Cherche récursivement la première valeur dont la clé est dans `names`
+function find(data, names) {
+  if (data && typeof data === "object") {
+    for (const n of names) if (typeof data[n] === "string" && data[n]) return data[n];
+    for (const v of Object.values(data)) { const f = find(v, names); if (f) return f; }
+  }
+  return null;
+}
+
+const msg = (t) => (document.getElementById("msg").textContent = t);
+
+document.getElementById("pay").onclick = async () => {
+  msg("Création du lien...");
+  try {
+    const res = await fetch(`${WORKER}/public/payment-links`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        label: document.getElementById("label").value,
+        amount: Number(document.getElementById("amount").value),
+        // Avec un catalogue côté Worker : { product_id: "bracelet", quantity: 1 }
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) return msg("Erreur : " + (data.error || res.status));
+
+    const link = find(data, ["payment_url", "checkout_url", "url", "link", "payment_link"]);
+    const ref = find(data, ["id", "reference"]);
+    if (!link) return msg("Lien introuvable dans la réponse : " + JSON.stringify(data));
+
+    sessionStorage.setItem("pay_ref", ref || "");
+    window.open(link, "_blank");   // le client paie sur la page DigitalPaye
+    msg("En attente du paiement...");
+    if (ref) waitForPayment(ref);
+  } catch (e) {
+    msg("Erreur réseau : " + e.message);
+  }
+};
+
+// Vérifie le statut toutes les 4 s pendant 10 minutes
+async function waitForPayment(ref) {
+  for (let i = 0; i < 150; i++) {
+    await new Promise((r) => setTimeout(r, 4000));
+    try {
+      const s = await (await fetch(`${WORKER}/public/status/${encodeURIComponent(ref)}`)).json();
+      if (s.paid) return msg("✅ Paiement confirmé : " + s.amount + " " + (s.currency || "XOF"));
+      if (s.status === "failed") return msg("❌ Paiement échoué.");
+    } catch { /* on réessaie */ }
+  }
+  msg("Délai dépassé. Vérifie ton paiement plus tard.");
+}
+</script>
+</body>
+</html>
