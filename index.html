@@ -1,77 +1,146 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Paiement</title>
-<style>
-  body { font-family: system-ui, sans-serif; max-width: 420px; margin: 2rem auto; padding: 0 1rem; }
-  input, button { width: 100%; padding: .7rem; margin: .4rem 0; font-size: 1rem; box-sizing: border-box; }
-  button { background: #111; color: #fff; border: 0; border-radius: 8px; }
-  #msg { margin-top: 1rem; }
-</style>
-</head>
-<body>
-  <h2>Payer</h2>
-  <input id="label" placeholder="Produit ou service" value="Bracelet">
-  <input id="amount" type="number" min="100" placeholder="Montant en XOF" value="1500">
-  <button id="pay">Payer</button>
-  <div id="msg"></div>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Paiement</title>
+    <style>
+      body { font: 16px system-ui, sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; color: #17202a; }
+      label, input, select, button { display: block; width: 100%; box-sizing: border-box; margin: .5rem 0 1rem; }
+      input, select, button { padding: .75rem; font: inherit; }
+      button { cursor: pointer; background: #155eef; color: white; border: 0; border-radius: .4rem; }
+      #result, #status-result { overflow-wrap: anywhere; }
+    </style>
+  </head>
+  <body>
+    <h1>Créer un lien de paiement</h1>
 
-<script>
-const WORKER = "https://jolly-field-a7d3.wellanmarie.workers.dev";
+    <form id="payment-form">
+      <label for="worker-url">URL du Worker Cloudflare</label>
+      <input id="worker-url" type="url" placeholder="https://votre-worker.workers.dev" required>
 
-// Cherche récursivement la première valeur dont la clé est dans `names`
-function find(data, names) {
-  if (data && typeof data === "object") {
-    for (const n of names) if (typeof data[n] === "string" && data[n]) return data[n];
-    for (const v of Object.values(data)) { const f = find(v, names); if (f) return f; }
-  }
-  return null;
-}
+      <label for="label">Produit ou service</label>
+      <input id="label" maxlength="120" value="Paiement" required>
 
-const msg = (t) => (document.getElementById("msg").textContent = t);
+      <label for="amount">Montant</label>
+      <select id="amount">
+        <option value="500">500 XOF</option>
+        <option value="1000">1 000 XOF</option>
+      </select>
 
-document.getElementById("pay").onclick = async () => {
-  msg("Création du lien...");
-  try {
-    const res = await fetch(`${WORKER}/public/payment-links`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        label: document.getElementById("label").value,
-        amount: Number(document.getElementById("amount").value),
-        // Avec un catalogue côté Worker : { product_id: "bracelet", quantity: 1 }
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) return msg("Erreur : " + (data.error || res.status));
+      <button type="submit">Générer le lien</button>
+    </form>
+    <p id="result" role="status" aria-live="polite"></p>
 
-    const link = find(data, ["payment_url", "checkout_url", "url", "link", "payment_link"]);
-    const ref = find(data, ["id", "reference"]);
-    if (!link) return msg("Lien introuvable dans la réponse : " + JSON.stringify(data));
+    <hr>
 
-    sessionStorage.setItem("pay_ref", ref || "");
-    window.open(link, "_blank");   // le client paie sur la page DigitalPaye
-    msg("En attente du paiement...");
-    if (ref) waitForPayment(ref);
-  } catch (e) {
-    msg("Erreur réseau : " + e.message);
-  }
-};
+    <h2>Vérifier un paiement</h2>
+    <form id="status-form">
+      <label for="reference">Référence de transaction DigitalPaye</label>
+      <input id="reference" autocomplete="off" required>
+      <button type="submit">Vérifier le statut</button>
+    </form>
+    <p id="status-result" role="status" aria-live="polite"></p>
 
-// Vérifie le statut toutes les 4 s pendant 10 minutes
-async function waitForPayment(ref) {
-  for (let i = 0; i < 150; i++) {
-    await new Promise((r) => setTimeout(r, 4000));
-    try {
-      const s = await (await fetch(`${WORKER}/public/status/${encodeURIComponent(ref)}`)).json();
-      if (s.paid) return msg("✅ Paiement confirmé : " + s.amount + " " + (s.currency || "XOF"));
-      if (s.status === "failed") return msg("❌ Paiement échoué.");
-    } catch { /* on réessaie */ }
-  }
-  msg("Délai dépassé. Vérifie ton paiement plus tard.");
-}
-</script>
-</body>
+    <script>
+      const form = document.querySelector("#payment-form");
+      const result = document.querySelector("#result");
+      const workerUrl = () =>
+        document.querySelector("#worker-url").value.replace(/\/$/, "");
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        result.textContent = "Création en cours…";
+
+        try {
+          const response = await fetch(`${workerUrl()}/api/payment-links`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              amount: Number(document.querySelector("#amount").value),
+              label: document.querySelector("#label").value,
+            }),
+          });
+
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error || "Création du lien impossible");
+          }
+
+          const link = findLink(data);
+          result.replaceChildren();
+
+          if (link) {
+            const anchor = document.createElement("a");
+            anchor.href = link;
+            anchor.textContent = link;
+            anchor.target = "_blank";
+            anchor.rel = "noopener noreferrer";
+            result.append("Lien créé : ", anchor);
+          } else {
+            result.textContent = JSON.stringify(data);
+          }
+        } catch (error) {
+          result.textContent = error.message;
+        }
+      });
+
+      document.querySelector("#status-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const statusResult = document.querySelector("#status-result");
+        const reference = document.querySelector("#reference").value.trim();
+        statusResult.textContent = "Vérification en cours…";
+
+        try {
+          const response = await fetch(
+            `${workerUrl()}/api/payments/${encodeURIComponent(reference)}`
+          );
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || "Vérification impossible");
+          }
+
+          const state = data.status || "inconnu";
+          const labels = {
+            successful: "Paiement confirmé",
+            success: "Paiement confirmé",
+            paid: "Paiement confirmé",
+            failed: "Paiement échoué",
+            payment_failed: "Paiement échoué",
+            pending: "En attente du webhook de DigitalPaye",
+          };
+
+          statusResult.textContent =
+            `${labels[state] || `Statut reçu : ${state}`} — référence ${reference}`;
+        } catch (error) {
+          statusResult.textContent = error.message;
+        }
+      });
+
+      function findLink(value) {
+        if (Array.isArray(value)) {
+          return value.map(findLink).find(Boolean);
+        }
+
+        if (value && typeof value === "object") {
+          for (const [key, child] of Object.entries(value)) {
+            if (
+              typeof child === "string" &&
+              /(url|link)/i.test(key) &&
+              /^https:\/\//.test(child)
+            ) {
+              return child;
+            }
+          }
+
+          for (const child of Object.values(value)) {
+            const found = findLink(child);
+            if (found) return found;
+          }
+        }
+      }
+    </script>
+  </body>
 </html>
