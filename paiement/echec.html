@@ -1,0 +1,252 @@
+<!DOCTYPE html><html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0b1220">
+  <title>Échec du paiement</title>  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      font-family: Arial, sans-serif;
+      background: #0b1220;
+      color: #fff;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 430px;
+      padding: 35px 25px;
+      text-align: center;
+      background: #121d30;
+      border: 1px solid #263449;
+      border-radius: 22px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+
+    .icon {
+      width: 82px;
+      height: 82px;
+      margin: 0 auto 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: rgba(248, 113, 113, 0.12);
+      color: #f87171;
+      font-size: 42px;
+      font-weight: bold;
+    }
+
+    h1 {
+      font-size: 25px;
+      margin-bottom: 14px;
+    }
+
+    .description {
+      color: #aab8cc;
+      font-size: 15px;
+      line-height: 1.7;
+      margin-bottom: 25px;
+    }
+
+    .status {
+      padding: 16px;
+      margin-bottom: 22px;
+      background: #0b1526;
+      border: 1px solid #263449;
+      border-radius: 12px;
+    }
+
+    .status-label {
+      color: #94a3b8;
+      font-size: 12px;
+      margin-bottom: 9px;
+    }
+
+    .status-value {
+      color: #facc15;
+      font-size: 14px;
+      font-weight: bold;
+      overflow-wrap: anywhere;
+    }
+
+    .reference {
+      margin-top: 12px;
+      color: #94a3b8;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .button {
+      display: block;
+      width: 100%;
+      padding: 15px;
+      margin-top: 12px;
+      border: none;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: bold;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .retry {
+      background: #22c55e;
+      color: #062510;
+    }
+
+    .retry:hover {
+      background: #4ade80;
+    }
+
+    .home {
+      background: #263449;
+      color: #fff;
+    }
+
+    .home:hover {
+      background: #34445d;
+    }
+
+    .note {
+      margin-top: 20px;
+      color: #94a3b8;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+  </style></head><body>
+  <main class="card">
+    <div class="icon" aria-hidden="true">✕</div><h1>Paiement non abouti</h1>
+
+<p class="description">
+  Votre transaction n'a pas pu être confirmée.
+  Cela peut être dû à une interruption ou à un problème
+  pendant le processus de paiement.
+</p>
+
+<div class="status">
+  <div class="status-label">STATUT DE LA TRANSACTION</div>
+  <div class="status-value" id="status">
+    Vérification en cours…
+  </div>
+  <div class="reference" id="reference"></div>
+</div>
+
+<a href="/" class="button retry" id="retry">
+  Réessayer le paiement
+</a>
+
+<a href="/" class="button home">
+  Retour à l'accueil
+</a>
+
+<p class="note" id="note">
+  Si votre compte a été débité, vérifiez le statut réel de la transaction
+  avant de tenter un nouveau paiement.
+</p>
+
+  </main>  <script>
+    // Remplace par l'adresse publique de ton Cloudflare Worker.
+    const WORKER_URL = "https://TON-WORKER.workers.dev";
+
+    const params = new URLSearchParams(window.location.search);
+    const reference = params.get("ref");
+
+    const statusElement = document.getElementById("status");
+    const referenceElement = document.getElementById("reference");
+    const noteElement = document.getElementById("note");
+
+    if (reference) {
+      referenceElement.textContent = "Référence : " + reference;
+    } else {
+      statusElement.textContent = "Référence indisponible";
+      noteElement.textContent =
+        "Aucune référence de transaction n'a été transmise. " +
+        "Vérifiez le statut du paiement avant de réessayer.";
+    }
+
+    async function verifyPayment() {
+      if (!reference) return "unknown";
+
+      try {
+        const response = await fetch(
+          WORKER_URL + "/api/payments/" + encodeURIComponent(reference)
+        );
+
+        if (!response.ok) throw new Error("Erreur de vérification");
+
+        const data = await response.json();
+
+        if (data.status === "successful") {
+          statusElement.textContent = "Paiement confirmé ✓";
+          statusElement.style.color = "#4ade80";
+
+          noteElement.textContent =
+            "DigitalPaye confirme que le paiement a réussi. " +
+            "Ne payez pas une seconde fois.";
+
+          document.getElementById("retry").style.display = "none";
+
+          return "successful";
+        }
+
+        if (data.status === "failed" || data.status === "cancelled") {
+          statusElement.textContent = "Échec confirmé";
+          statusElement.style.color = "#f87171";
+
+          noteElement.textContent =
+            "L'échec de la transaction a été confirmé. " +
+            "Vous pouvez réessayer si vous le souhaitez.";
+
+          return "failed";
+        }
+
+        statusElement.textContent = "Confirmation en attente…";
+        statusElement.style.color = "#facc15";
+
+        noteElement.textContent =
+          "Nous attendons la confirmation de DigitalPaye. " +
+          "Ne tentez pas immédiatement un deuxième paiement.";
+
+        return "pending";
+
+      } catch (error) {
+        statusElement.textContent = "Vérification indisponible";
+        statusElement.style.color = "#facc15";
+
+        noteElement.textContent =
+          "Impossible de vérifier la transaction pour le moment. " +
+          "Cela ne signifie pas nécessairement que le paiement a échoué.";
+
+        return "unknown";
+      }
+    }
+
+    async function monitorPayment() {
+      if (!reference) return;
+
+      for (let i = 0; i < 30; i++) {
+        const result = await verifyPayment();
+
+        if (result === "successful" || result === "failed") return;
+
+        await new Promise(resolve => setTimeout(resolve, 4000));
+      }
+
+      noteElement.textContent =
+        "La vérification prend plus de temps que prévu. " +
+        "Consultez à nouveau le statut avant de recommencer le paiement.";
+    }
+
+    monitorPayment();
+  </script></body>
+</html>
