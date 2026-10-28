@@ -1,235 +1,252 @@
 <!doctype html>
 <html lang="fr">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Paiement</title>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Paiement</title>
+  <style>
+    body {
+      font: 16px system-ui, sans-serif;
+      max-width: 32rem;
+      margin: 3rem auto;
+      padding: 0 1rem;
+      color: #17202a;
+    }
+    label, input, select, button {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      margin: .5rem 0 1rem;
+    }
+    input, select, button {
+      padding: .75rem;
+      font: inherit;
+    }
+    button {
+      cursor: pointer;
+      background: #155eef;
+      color: white;
+      border: 0;
+      border-radius: .4rem;
+    }
+    #result, #status-result, #debug-result {
+      overflow-wrap: anywhere;
+    }
+    #debug-result {
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <h1>Créer un lien de paiement</h1>
 
-    <style>
-      body {
-        font: 16px system-ui, sans-serif;
-        max-width: 32rem;
-        margin: 3rem auto;
-        padding: 0 1rem;
-        color: #17202a;
-      }
+  <label for="worker-url">URL de production du Worker Cloudflare</label>
+  <input
+    id="worker-url"
+    type="url"
+    value="https://TON-WORKER.workers.dev"
+    required
+  >
 
-      label,
-      input,
-      select,
-      button {
-        display: block;
-        width: 100%;
-        box-sizing: border-box;
-        margin: 0.5rem 0 1rem;
-      }
+  <form id="payment-form">
+    <label for="label">Produit ou service</label>
+    <input id="label" maxlength="120" value="Paiement" required>
 
-      input,
-      select,
-      button {
-        padding: 0.75rem;
-        font: inherit;
-      }
+    <label for="amount">Montant</label>
+    <select id="amount">
+      <option value="500">500 XOF</option>
+      <option value="1000">1 000 XOF</option>
+    </select>
 
-      button {
-        cursor: pointer;
-        background: #155eef;
-        color: white;
-        border: 0;
-        border-radius: 0.4rem;
-      }
+    <button type="submit">Générer le lien</button>
+  </form>
 
-      #result,
-      #status-result {
-        overflow-wrap: anywhere;
-      }
-    </style>
-  </head>
+  <p id="result" role="status" aria-live="polite"></p>
 
-  <body>
-    <h1>Créer un lien de paiement</h1>
+  <hr>
 
-    <form id="payment-form">
-      <label for="label">Produit ou service</label>
-      <input id="label" maxlength="120" value="Paiement" required>
+  <h2>Vérifier un paiement</h2>
+  <form id="status-form">
+    <label for="reference">Référence de transaction DigitalPaye</label>
+    <input id="reference" autocomplete="off" required>
+    <button type="submit">Vérifier le statut</button>
+  </form>
+  <p id="status-result" role="status" aria-live="polite"></p>
 
-      <label for="amount">Montant</label>
-      <select id="amount">
-        <option value="500">500 XOF</option>
-        <option value="1000">1 000 XOF</option>
-      </select>
+  <hr>
 
-      <button type="submit">Générer le lien</button>
-    </form>
+  <h2>Diagnostic DigitalPaye</h2>
+  <form id="debug-form">
+    <label for="debug-key">Secret webhook</label>
+    <input id="debug-key" type="password" autocomplete="off" required>
+    <button type="submit">Lancer le diagnostic</button>
+  </form>
+  <pre id="debug-result"></pre>
 
-    <p id="result" role="status" aria-live="polite"></p>
+  <script>
+    const api = () =>
+      document.querySelector("#worker-url").value.trim().replace(/\/$/, "");
 
-    <hr>
+    const paymentForm = document.querySelector("#payment-form");
+    const result = document.querySelector("#result");
+    const statusResult = document.querySelector("#status-result");
+    const referenceInput = document.querySelector("#reference");
+    const debugResult = document.querySelector("#debug-result");
 
-    <h2>Vérifier un paiement</h2>
+    paymentForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      result.textContent = "Création en cours…";
 
-    <form id="status-form">
-      <label for="reference">Référence de transaction DigitalPaye</label>
-      <input id="reference" autocomplete="off" required>
+      try {
+        const response = await fetch(`${api()}/api/payment-links`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            amount: Number(document.querySelector("#amount").value),
+            label: document.querySelector("#label").value.trim()
+          })
+        });
 
-      <button type="submit">Vérifier le statut</button>
-    </form>
+        const data = await response.json();
 
-    <p id="status-result" role="status" aria-live="polite"></p>
-
-    <script>
-      // La page appelle l'API sur le même domaine, local ou ngrok.
-      const api = "https://mute-credit-ff35.billionsjonnhy.workers.dev/";
-
-      const paymentForm = document.querySelector("#payment-form");
-      const result = document.querySelector("#result");
-      const statusForm = document.querySelector("#status-form");
-      const statusResult = document.querySelector("#status-result");
-      const referenceInput = document.querySelector("#reference");
-
-      paymentForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        result.textContent = "Création en cours…";
-
-        try {
-          const response = await fetch(`${api}/api/payment-links`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              amount: Number(document.querySelector("#amount").value),
-              label: document.querySelector("#label").value.trim(),
-            }),
-          });
-
-          const data = await response.json();
-
-          if (!response.ok) {
-            throw new Error(data.error || "Création du lien impossible");
-          }
-
-          const paymentLink = findLink(data);
-          const reference = findReference(data);
-
-          result.replaceChildren();
-
-          if (paymentLink) {
-            const anchor = document.createElement("a");
-            anchor.href = paymentLink;
-            anchor.textContent = paymentLink;
-            anchor.target = "_blank";
-            anchor.rel = "noopener noreferrer";
-            result.append("Lien créé : ", anchor);
-          }
-
-          if (reference) {
-            result.append(
-              document.createElement("br"),
-              `Référence de transaction : ${reference}`
-            );
-
-            referenceInput.value = reference;
-            statusResult.textContent =
-              "Référence copiée. Tu peux vérifier le statut du paiement.";
-          } else {
-            const note = document.createElement("p");
-            note.textContent =
-              "La réponse de création ne contient pas encore de référence de transaction. Récupère-la dans l’événement webhook DigitalPaye (transaction.reference), puis saisis-la ci-dessus.";
-            result.append(note);
-          }
-
-          if (!paymentLink && !reference) {
-            result.prepend(document.createTextNode(JSON.stringify(data)));
-          }
-        } catch (error) {
-          result.textContent = error.message;
-        }
-      });
-
-      statusForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-
-        const reference = referenceInput.value.trim();
-
-        if (!reference) {
-          statusResult.textContent = "Saisis une référence de transaction.";
-          return;
-        }
-
-        statusResult.textContent = "Vérification en cours…";
-
-        try {
-          const response = await fetch(
-            `${api}/api/payments/${encodeURIComponent(reference)}`
+        if (!response.ok) {
+          throw new Error(
+            `${data.error || "Création du lien impossible"} (HTTP ${response.status})` +
+            (data.message ? ` : ${data.message}` : "") +
+            (data.details ? ` : ${JSON.stringify(data.details)}` : "")
           );
+        }
 
-          const data = await response.json();
+        const paymentLink = findLink(data);
+        const reference = findReference(data);
 
-          if (!response.ok) {
-            throw new Error(data.error || "Vérification impossible");
-          }
+        result.replaceChildren();
 
-          const statusLabels = {
-            successful: "Paiement confirmé",
-            failed: "Paiement échoué",
-            cancelled: "Paiement annulé",
-            pending: "En attente du webhook de DigitalPaye",
-          };
+        if (paymentLink) {
+          const anchor = document.createElement("a");
+          anchor.href = paymentLink;
+          anchor.textContent = paymentLink;
+          anchor.target = "_blank";
+          anchor.rel = "noopener noreferrer";
+          result.append("Lien créé : ", anchor);
+        }
 
+        if (reference) {
+          result.append(
+            document.createElement("br"),
+            `Référence de transaction : ${reference}`
+          );
+          referenceInput.value = reference;
           statusResult.textContent =
-            `${statusLabels[data.status] || `Statut reçu : ${data.status || "inconnu"}`} — référence ${reference}`;
-        } catch (error) {
-          statusResult.textContent = error.message;
+            "Référence copiée. Tu peux vérifier le statut du paiement.";
+        } else {
+          const note = document.createElement("p");
+          note.textContent =
+            "La réponse de création ne contient pas de référence de transaction. Après le paiement, saisis ici la valeur transaction.reference reçue par webhook.";
+          result.append(note);
         }
-      });
+      } catch (error) {
+        result.textContent = error.message;
+      }
+    });
 
-      function findLink(value) {
-        if (Array.isArray(value)) {
-          return value.map(findLink).find(Boolean);
+    document.querySelector("#status-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const reference = referenceInput.value.trim();
+      statusResult.textContent = "Vérification en cours…";
+
+      try {
+        const response = await fetch(
+          `${api()}/api/payments/${encodeURIComponent(reference)}`
+        );
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            `${data.error || "Vérification impossible"} (HTTP ${response.status})` +
+            (data.message ? ` : ${data.message}` : "")
+          );
         }
 
-        if (value && typeof value === "object") {
-          for (const [key, child] of Object.entries(value)) {
-            if (
-              typeof child === "string" &&
-              /(url|link)/i.test(key) &&
-              /^https:\/\//i.test(child)
-            ) {
-              return child;
-            }
+        const labels = {
+          successful: "Paiement confirmé",
+          failed: "Paiement échoué",
+          cancelled: "Paiement annulé",
+          pending: "En attente du webhook de DigitalPaye"
+        };
+
+        statusResult.textContent =
+          `${labels[data.status] || `Statut reçu : ${data.status || "inconnu"}`} — référence ${reference}`;
+      } catch (error) {
+        statusResult.textContent = error.message;
+      }
+    });
+
+    document.querySelector("#debug-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      debugResult.textContent = "Diagnostic en cours…";
+
+      try {
+        const response = await fetch(`${api()}/api/debug-auth`, {
+          headers: {
+            "X-Debug-Key": document.querySelector("#debug-key").value
           }
+        });
 
-          for (const child of Object.values(value)) {
-            const found = findLink(child);
-            if (found) return found;
-          }
-        }
+        debugResult.textContent =
+          JSON.stringify(await response.json(), null, 2);
+      } catch (error) {
+        debugResult.textContent = `Diagnostic impossible : ${error.message}`;
+      }
+    });
 
-        return undefined;
+    function findLink(value) {
+      if (Array.isArray(value)) {
+        return value.map(findLink).find(Boolean);
       }
 
-      function findReference(value) {
-        if (!value || typeof value !== "object") {
-          return undefined;
-        }
-
-        // Utilise uniquement "reference", jamais "id".
-        if (
-          Object.prototype.hasOwnProperty.call(value, "reference") &&
-          value.reference != null &&
-          typeof value.reference !== "object"
-        ) {
-          return String(value.reference);
+      if (value && typeof value === "object") {
+        for (const [key, child] of Object.entries(value)) {
+          if (
+            typeof child === "string" &&
+            /(url|link)/i.test(key) &&
+            /^https:\/\//i.test(child)
+          ) {
+            return child;
+          }
         }
 
         for (const child of Object.values(value)) {
-          const found = findReference(child);
+          const found = findLink(child);
           if (found) return found;
         }
+      }
 
+      return undefined;
+    }
+
+    function findReference(value) {
+      if (!value || typeof value !== "object") {
         return undefined;
       }
-    </script>
-  </body>
+
+      // Prend uniquement le champ reference, jamais le champ id.
+      if (
+        Object.prototype.hasOwnProperty.call(value, "reference") &&
+        value.reference != null &&
+        typeof value.reference !== "object"
+      ) {
+        return String(value.reference);
+      }
+
+      for (const child of Object.values(value)) {
+        const found = findReference(child);
+        if (found) return found;
+      }
+
+      return undefined;
+    }
+  </script>
+</body>
 </html>
