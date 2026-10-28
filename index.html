@@ -69,7 +69,7 @@
     <h2>Vérifier un paiement</h2>
 
     <form id="status-form">
-      <label for="reference">Référence du paiement</label>
+      <label for="reference">Référence de transaction DigitalPaye</label>
       <input id="reference" autocomplete="off" required>
 
       <button type="submit">Vérifier le statut</button>
@@ -78,7 +78,9 @@
     <p id="status-result" role="status" aria-live="polite"></p>
 
     <script>
+      // La page appelle l'API sur le même domaine, local ou ngrok.
       const api = "https://unwitting-cone-waviness.ngrok-free.dev";
+
       const paymentForm = document.querySelector("#payment-form");
       const result = document.querySelector("#result");
       const statusForm = document.querySelector("#status-form");
@@ -118,23 +120,27 @@
             anchor.textContent = paymentLink;
             anchor.target = "_blank";
             anchor.rel = "noopener noreferrer";
-
             result.append("Lien créé : ", anchor);
           }
 
           if (reference) {
             result.append(
               document.createElement("br"),
-              `Référence du lien : ${reference}`
+              `Référence de transaction : ${reference}`
             );
 
             referenceInput.value = reference;
             statusResult.textContent =
-              "Référence copiée dans le formulaire. Le statut sera actualisé après réception du webhook DigitalPaye.";
+              "Référence copiée. Tu peux vérifier le statut du paiement.";
+          } else {
+            const note = document.createElement("p");
+            note.textContent =
+              "La réponse de création ne contient pas encore de référence de transaction. Récupère-la dans l’événement webhook DigitalPaye (transaction.reference), puis saisis-la ci-dessus.";
+            result.append(note);
           }
 
           if (!paymentLink && !reference) {
-            result.textContent = JSON.stringify(data);
+            result.prepend(document.createTextNode(JSON.stringify(data)));
           }
         } catch (error) {
           result.textContent = error.message;
@@ -145,6 +151,12 @@
         event.preventDefault();
 
         const reference = referenceInput.value.trim();
+
+        if (!reference) {
+          statusResult.textContent = "Saisis une référence de transaction.";
+          return;
+        }
+
         statusResult.textContent = "Vérification en cours…";
 
         try {
@@ -202,19 +214,13 @@
           return undefined;
         }
 
-        const keys = [
-          "payment_link_id",
-          "link_id",
-          "payment_link_reference",
-          "link_reference",
-          "reference",
-          "id",
-        ];
-
-        for (const key of keys) {
-          if (value[key] != null && typeof value[key] !== "object") {
-            return String(value[key]);
-          }
+        // Utilise uniquement "reference", jamais "id".
+        if (
+          Object.prototype.hasOwnProperty.call(value, "reference") &&
+          value.reference != null &&
+          typeof value.reference !== "object"
+        ) {
+          return String(value.reference);
         }
 
         for (const child of Object.values(value)) {
