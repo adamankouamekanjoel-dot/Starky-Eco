@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cotisation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&family=Source+Serif+4:wght@400;600&display=swap">
+<style>
+  :root{
+    --bg:#f3f1ec; --card:#fffdf9; --ink:#1b2a24; --mute:#66726c; --line:#d9d4c8;
+    --accent:#0e5a43; --accent-ink:#fff; --warn:#a5560a; --bad:#a32a2a; --good:#0e5a43;
+    --font:"Bricolage Grotesque",system-ui,sans-serif; --serif:"Source Serif 4",Georgia,serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#121916; --card:#1a231f; --ink:#e9efe9; --mute:#93a199; --line:#2c3a34; --accent:#4cc79b; --accent-ink:#06241a; --warn:#e0a458; --bad:#ef8a8a; --good:#4cc79b}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);min-height:100vh;display:grid;place-items:start center;padding:32px 16px}
+  main{width:min(100%,480px)}
+  h1{font-size:30px;font-weight:800;margin:0 0 4px;letter-spacing:-.02em}
+  .sub{color:var(--mute);margin:0 0 20px;font-family:var(--serif)}
+  .env{display:inline-block;font-size:12px;padding:2px 8px;border:1px solid var(--warn);color:var(--warn);border-radius:99px;margin-bottom:12px}
+  .env.live{border-color:var(--line);color:var(--mute)}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:12px}
+  section[hidden]{display:none}
+  h2{font-size:15px;margin:0 0 12px;font-weight:600}
+  label{display:block;font-size:13px;color:var(--mute);margin:12px 0 4px}
+  input{width:100%;padding:12px;font:inherit;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:8px}
+  input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .amount{font-size:28px;font-weight:800;font-variant-numeric:tabular-nums}
+  .ops{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .ops label{margin:0;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px;cursor:pointer;display:flex;gap:8px;align-items:center}
+  .ops input{width:auto}
+  .ops label:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent)}
+  button{font:inherit;font-weight:600;border:0;border-radius:8px;padding:13px 16px;cursor:pointer;background:var(--accent);color:var(--accent-ink);width:100%;margin-top:16px}
+  button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  button:disabled{opacity:.55;cursor:wait}
+  .row{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:14px}
+  .row:last-child{border:0}
+  .row span:first-child{color:var(--mute)}
+  .link{word-break:break-all;font-size:13px;color:var(--mute)}
+  .msg{margin-top:12px;font-size:14px;min-height:1.2em}
+  .msg.err{color:var(--bad)} .msg.ok{color:var(--good)} .msg.wait{color:var(--warn)}
+  .status{font-size:22px;font-weight:800}
+  [hidden]{display:none!important}
+  @media (prefers-reduced-motion:no-preference){.spin{animation:s 1s linear infinite;display:inline-block}@keyframes s{to{transform:rotate(360deg)}}}
+</style>
+</head>
+<body>
+<main>
+  <span id="env" class="env" hidden></span>
+  <h1>Ma cotisation</h1>
+  <p class="sub">Saisissez le montant, payez avec votre mobile money, puis confirmez.</p>
+
+  <!-- Étape 1 : montant -> lien -->
+  <section id="s1">
+    <h2>Montant de la cotisation</h2>
+    <label for="amount">Montant (XOF)</label>
+    <input id="amount" class="amount" type="number" inputmode="numeric" min="100" step="1" placeholder="5000">
+    <label for="name">Nom du membre</label>
+    <input id="name" type="text" autocomplete="name" placeholder="Kouamé Brou">
+    <button id="btnLink">Générer le lien de paiement</button>
+    <div id="m1" class="msg" role="status"></div>
+  </section>
+
+  <!-- Étape 2 : paiement -->
+  <section id="s2" hidden>
+    <h2>Paiement</h2>
+    <div class="row"><span>Référence</span><b id="r-ref"></b></div>
+    <div class="row"><span>Montant</span><b id="r-amount"></b></div>
+    <div class="row"><span>Expire dans</span><b id="r-exp"></b></div>
+    <div class="row"><span>Lien</span><a id="r-link" class="link" target="_blank" rel="noopener"></a></div>
+    <label>Opérateur</label>
+    <div id="ops" class="ops"></div>
+    <label for="phone">Numéro mobile money</label>
+    <input id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0701020304">
+    <div id="otpBox" hidden>
+      <label for="otp">Code OTP Orange Money (4 chiffres)</label>
+      <input id="otp" inputmode="numeric" maxlength="4" placeholder="1234">
+    </div>
+    <button id="btnPay">Payer</button>
+    <button id="btnRegen" class="ghost" hidden>Générer un nouveau lien</button>
+    <div id="m2" class="msg" role="status"></div>
+  </section>
+
+  <!-- Étape 3 : vérification -->
+  <section id="s3" hidden>
+    <h2>Confirmation</h2>
+    <div id="st" class="status">—</div>
+    <div id="m3" class="msg" role="status"></div>
+    <button id="btnVerify" class="ghost">Vérifier le paiement</button>
+    <button id="btnNew" class="ghost" hidden>Nouvelle cotisation</button>
+  </section>
+</main>
+
+<script>
+const API_BASE = "https://digital-paye.billionsjonnhy.workers.dev";
+
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => new Intl.NumberFormat("fr-FR").format(n) + " XOF";
+let cfg = null, tx = null, poll = null;
+// tx = { ticket, external_ref, amount, link_url, reference }
+
+/* État conservé pour reprendre après le retour de Wave */
+const store = {
+  get(){ try { return JSON.parse(localStorage.getItem("cot_tx")); } catch { return null; } },
+  set(v){ try { v ? localStorage.setItem("cot_tx", JSON.stringify(v)) : localStorage.removeItem("cot_tx"); } catch {} }
+};
+
+async function api(path, opts = {}) {
+  const res = await fetch(API_BASE + path, { ...opts, headers: { "Content-Type": "application/json" }, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) { const e = new Error(json.message || "Erreur réseau"); e.status = res.status; e.data = json; throw e; }
+  return json;
+}
+const say = (id, text, cls = "") => { const el = $(id); el.textContent = text; el.className = "msg " + cls; };
+const busy = (btn, on, label) => { btn.disabled = on; if (label) btn.textContent = label; };
+const show = (step) => ["s1","s2","s3"].forEach((s) => $(s).hidden = !step.includes(s));
+
+async function init() {
+  try {
+    cfg = (await api("/api/config")).data;
+    const env = $("env"); env.hidden = false; env.textContent = cfg.mode === "live" ? "Production" : "Mode test (sandbox)"; env.className = "env " + cfg.mode;
+    $("amount").min = cfg.min_amount;
+    $("ops").innerHTML = cfg.operators.map((o, i) => `<label><input type="radio" name="op" value="${o.code}" ${i === 0 ? "checked" : ""}> ${o.label}</label>`).join("");
+    $("ops").addEventListener("change", syncOp); syncOp();
+  } catch (e) { say("m1", "Service indisponible : " + e.message, "err"); }
+
+  // Reprise (retour de Wave ou rechargement de page)
+  const saved = store.get();
+  if (saved?.ticket) {
+    tx = saved; renderTx();
+    if (saved.reference) { show(["s3"]); say("m3", "Vérification en cours…", "wait"); await verify(false); if (!$("btnVerify").hidden) startPolling(); }
+    else show(["s2"]);
+  }
+}
+
+function syncOp() {
+  const code = document.querySelector("input[name=op]:checked")?.value;
+  $("otpBox").hidden = !cfg?.operators.find((o) => o.code === code)?.needs_otp;
+}
+
+let tick = null;
+function countdown() {
+  clearInterval(tick);
+  const upd = () => {
+    const left = Math.max(0, Math.floor((new Date(tx.expires_at) - Date.now()) / 1000));
+    $("r-exp").textContent = left ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "expiré";
+    if (!left) {
+      clearInterval(tick);
+      if (!tx.reference) { $("btnPay").disabled = true; say("m2", "Lien expiré. Générez un nouveau lien.", "err"); $("btnRegen").hidden = false; }
+    }
+  };
+  upd(); tick = setInterval(upd, 1000);
+}
+
+function renderTx() {
+  $("r-ref").textContent = tx.external_ref;
+  $("r-amount").textContent = fmt(tx.amount);
+  if (tx.expires_at && !tx.reference) countdown(); else { clearInterval(tick); $("r-exp").parentElement.hidden = true; }
+  const a = $("r-link"); if (tx.link_url) { a.href = tx.link_url; a.textContent = tx.link_url; } else a.textContent = "—";
+}
+
+/* Étape 1 : montant -> lien */
+$("btnLink").onclick = async () => {
+  const amount = Number($("amount").value);
+  if (!Number.isInteger(amount) || amount < (cfg?.min_amount || 100)) return say("m1", `Montant minimum : ${cfg?.min_amount || 100} XOF.`, "err");
+  busy($("btnLink"), true, "Génération…");
+  try {
+    const r = await api("/api/payment-links", { method: "POST", body: { amount, member_name: $("name").value, label: "Cotisation" } });
+    tx = { ticket: r.data.ticket, external_ref: r.data.external_ref, amount: r.data.amount, link_url: r.data.link_url, expires_at: r.data.expires_at };
+    store.set(tx); renderTx(); show(["s2"]);
+  } catch (e) { say("m1", e.message, "err"); }
+  finally { busy($("btnLink"), false, "Générer le lien de paiement"); }
+};
+
+/* Étape 2 : paiement */
+$("btnPay").onclick = async () => {
+  const operator = document.querySelector("input[name=op]:checked").value;
+  busy($("btnPay"), true, "Envoi…"); say("m2", "");
+  try {
+    const r = await api("/api/pay", { method: "POST", body: { ticket: tx.ticket, operator, phone: $("phone").value, otp: $("otp").value, first_name: ($("name").value || "").split(" ")[0] } });
+    tx.reference = r.data.reference; store.set(tx);   // sauvegardé AVANT une éventuelle redirection Wave
+    if (r.data.next === "redirect" && r.data.redirect_url) { say("m2", "Redirection vers Wave…", "wait"); location.href = r.data.redirect_url; return; }
+    show(["s3"]); $("btnVerify").hidden = false; $("btnNew").hidden = true; say("m3", r.message, "wait"); startPolling();
+  } catch (e) {
+    if (e.status === 410) $("btnRegen").hidden = false;
+    say("m2", e.message + (e.data?.retry_after ? ` (réessayez dans ${e.data.retry_after}s)` : ""), "err");
+  } finally { busy($("btnPay"), false, "Payer"); }
+};
+
+/* Étape 3 : vérification */
+async function verify(manual) {
+  if (!tx?.reference) return;
+  if (manual) busy($("btnVerify"), true, "Vérification…");
+  try {
+    const r = await api(`/api/verify/${encodeURIComponent(tx.reference)}?ticket=${encodeURIComponent(tx.ticket)}`);
+    const d = r.data;
+    const labels = { successful: "Paiement confirmé", failed: "Paiement échoué", initiated: "En attente de validation", pending: "En attente" };
+    $("st").textContent = labels[d.status] || d.status;
+    if (d.confirmed) { stopPolling(); say("m3", `${fmt(d.amount)} reçus. Référence ${d.reference}. Merci !`, "ok"); $("btnVerify").hidden = true; $("btnNew").hidden = false; $("btnNew").textContent = "Nouvelle cotisation"; $("btnNew").onclick = reset; store.set(null); }
+    else if (d.status === "failed") { stopPolling(); say("m3", d.failure_reason || "Le paiement a échoué.", "err"); $("btnVerify").hidden = true; $("btnNew").hidden = false; $("btnNew").textContent = "Réessayer"; $("btnNew").onclick = () => { delete tx.reference; store.set(tx); $("r-exp").parentElement.hidden = false; renderTx(); show(["s2"]); }; }
+    else say("m3", r.message, d.amount_mismatch ? "err" : "wait");
+  } catch (e) { say("m3", e.message, "err"); }
+  finally { if (manual) busy($("btnVerify"), false, "Vérifier le paiement"); }
+}
+
+function startPolling() { stopPolling(); let n = 0; poll = setInterval(() => { if (++n > 30) return stopPolling(); verify(false); }, 4000); }
+function stopPolling() { clearInterval(poll); poll = null; }
+function reset() { store.set(null); history.replaceState(null, "", location.pathname); location.reload(); }
+
+$("btnRegen").onclick = reset;
+$("btnVerify").onclick = () => verify(true);
+init();
+</script>
+</body>
+</html>
