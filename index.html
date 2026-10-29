@@ -1,252 +1,401 @@
 <!doctype html>
 <html lang="fr">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Paiement</title>
-  <style>
-    body {
-      font: 16px system-ui, sans-serif;
-      max-width: 32rem;
-      margin: 3rem auto;
-      padding: 0 1rem;
-      color: #17202a;
-    }
-    label, input, select, button {
-      display: block;
-      width: 100%;
-      box-sizing: border-box;
-      margin: .5rem 0 1rem;
-    }
-    input, select, button {
-      padding: .75rem;
-      font: inherit;
-    }
-    button {
-      cursor: pointer;
-      background: #155eef;
-      color: white;
-      border: 0;
-      border-radius: .4rem;
-    }
-    #result, #status-result, #debug-result {
-      overflow-wrap: anywhere;
-    }
-    #debug-result {
-      white-space: pre-wrap;
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Cotisation — Starky</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap">
+<style>
+  :root{
+    --bg:#f2f1ec; --card:#ffffff; --ink:#14211c; --mute:#5f6d66; --line:#dcd9cf;
+    --accent:#0d5c45; --accent-ink:#ffffff; --accent-soft:#e3f1ea;
+    --warn:#9a5b0a; --warn-soft:#fbf0dc; --bad:#a32a2a; --bad-soft:#fbe5e5; --good:#0d5c45;
+    --font:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --radius:14px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#0f1613; --card:#17211c; --ink:#e8efe9; --mute:#92a299; --line:#2a3832;
+      --accent:#4cc79b; --accent-ink:#06241a; --accent-soft:#17342a;
+      --warn:#e3a95a; --warn-soft:#33270f; --bad:#f09090; --bad-soft:#391a1a; --good:#4cc79b}
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);line-height:1.45;min-height:100vh;padding:24px 16px 48px}
+  main{max-width:480px;margin:0 auto}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+  .brand{font-weight:800;font-size:22px;letter-spacing:-.02em}
+  .brand small{display:block;font-weight:400;font-size:13px;color:var(--mute);letter-spacing:0}
+  .badge{font-size:12px;font-weight:600;padding:4px 10px;border-radius:99px;background:var(--warn-soft);color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent)}
+  .badge[hidden]{display:none}
+
+  .steps{display:flex;gap:6px;margin:0 0 14px;padding:0;list-style:none}
+  .steps li{flex:1;font-size:12px;color:var(--mute);border-top:3px solid var(--line);padding-top:6px}
+  .steps li.on{color:var(--ink);border-color:var(--accent);font-weight:600}
+  .steps li.done{border-color:var(--accent);color:var(--mute)}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+  .card[hidden]{display:none}
+  h1{font-size:20px;margin:0 0 4px;font-weight:800;letter-spacing:-.01em}
+  .lead{margin:0 0 16px;color:var(--mute);font-size:14px}
+  label,.lab{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}
+  .hint{font-size:12px;color:var(--mute);margin-top:4px;font-weight:400}
+  input[type=text],input[type=tel],input[type=number]{width:100%;font:inherit;font-size:16px;color:var(--ink);background:transparent;border:1.5px solid var(--line);border-radius:10px;padding:12px 14px}
+  input:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 55%,transparent);outline-offset:2px}
+  input:focus{border-color:var(--accent)}
+  .amount-wrap{position:relative}
+  .amount-wrap input{font-size:30px;font-weight:800;padding-right:64px;font-variant-numeric:tabular-nums}
+  .amount-wrap span{position:absolute;right:14px;top:50%;transform:translateY(-50%);color:var(--mute);font-weight:600}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .chip{font:inherit;font-size:14px;font-weight:600;padding:8px 14px;border-radius:99px;border:1.5px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
+  .chip:hover{border-color:var(--accent)}
+
+  .ops{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .op{position:relative}
+  .op input{position:absolute;opacity:0;inset:0;cursor:pointer;margin:0}
+  .op label{margin:0;display:flex;align-items:center;gap:10px;padding:12px;border:1.5px solid var(--line);border-radius:10px;font-weight:600;font-size:14px;cursor:pointer}
+  .op input:checked + label{border-color:var(--accent);background:var(--accent-soft)}
+  .op input:focus-visible + label{outline:3px solid color-mix(in srgb,var(--accent) 55%,transparent);outline-offset:2px}
+  .dot{width:12px;height:12px;border-radius:50%;flex:none}
+
+  button.primary,button.ghost{font:inherit;font-weight:700;font-size:16px;width:100%;margin-top:18px;padding:14px 16px;border-radius:10px;cursor:pointer;border:1.5px solid transparent}
+  button.primary{background:var(--accent);color:var(--accent-ink)}
+  button.ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+  button:disabled{opacity:.55;cursor:progress}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .row2 button{margin-top:10px}
+
+  .summary{border:1px solid var(--line);border-radius:10px;padding:4px 14px;margin-bottom:4px}
+  .line{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px dashed var(--line);font-size:14px}
+  .line:last-child{border:0}
+  .line span:first-child{color:var(--mute)}
+  .line b{text-align:right;word-break:break-all}
+  .linkbox{display:flex;gap:8px;align-items:center;margin-top:10px}
+  .linkbox input{font-size:13px;padding:9px 10px}
+  .linkbox button{width:auto;margin:0;padding:9px 12px;font-size:13px;font-weight:600;flex:none}
+
+  .msg{margin-top:14px;padding:10px 12px;border-radius:10px;font-size:14px;display:none}
+  .msg.show{display:block}
+  .msg.err{background:var(--bad-soft);color:var(--bad)}
+  .msg.wait{background:var(--warn-soft);color:var(--warn)}
+  .msg.ok{background:var(--accent-soft);color:var(--good)}
+
+  .state{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .state .ico{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-size:22px;font-weight:800;flex:none;background:var(--warn-soft);color:var(--warn)}
+  .state.ok .ico{background:var(--accent-soft);color:var(--good)}
+  .state.ko .ico{background:var(--bad-soft);color:var(--bad)}
+  .state h1{margin:0}
+  .spin{width:22px;height:22px;border:3px solid currentColor;border-right-color:transparent;border-radius:50%;display:block}
+  @media (prefers-reduced-motion:no-preference){.spin{animation:r .9s linear infinite}@keyframes r{to{transform:rotate(360deg)}}}
+  footer{margin-top:18px;text-align:center;font-size:12px;color:var(--mute)}
+  [hidden]{display:none!important}
+  @media print{body{background:#fff;padding:0}header,.steps,footer,button,.linkbox{display:none!important}.card{border:0}}
+</style>
 </head>
 <body>
-  <h1>Créer un lien de paiement</h1>
+<main>
+  <header>
+    <div class="brand">Starky<small>Ma cotisation</small></div>
+    <span id="env" class="badge" hidden>Mode test</span>
+  </header>
 
-  <label for="worker-url">URL de production du Worker Cloudflare</label>
-  <input
-    id="worker-url"
-    type="url"
-    value="https://TON-WORKER.workers.dev"
-    required
-  >
+  <ol class="steps" aria-label="Étapes">
+    <li id="st1" class="on">1. Montant</li>
+    <li id="st2">2. Paiement</li>
+    <li id="st3">3. Confirmation</li>
+  </ol>
 
-  <form id="payment-form">
-    <label for="label">Produit ou service</label>
-    <input id="label" maxlength="120" value="Paiement" required>
+  <!-- 1 : montant -->
+  <section id="p1" class="card">
+    <h1>Montant de la cotisation</h1>
+    <p class="lead">Choisissez ou saisissez le montant, nous générons votre lien de paiement.</p>
 
     <label for="amount">Montant</label>
-    <select id="amount">
-      <option value="500">500 XOF</option>
-      <option value="1000">1 000 XOF</option>
-    </select>
+    <div class="amount-wrap">
+      <input id="amount" type="number" inputmode="numeric" min="100" step="1" placeholder="5000" autocomplete="off">
+      <span>XOF</span>
+    </div>
+    <div class="chips" id="chips" role="group" aria-label="Montants rapides"></div>
 
-    <button type="submit">Générer le lien</button>
-  </form>
+    <label for="name">Nom du membre</label>
+    <input id="name" type="text" autocomplete="name" placeholder="Prénom Nom" maxlength="80">
 
-  <p id="result" role="status" aria-live="polite"></p>
+    <button id="btnLink" class="primary">Générer le lien de paiement</button>
+    <div id="m1" class="msg" role="alert"></div>
+  </section>
 
-  <hr>
+  <!-- 2 : paiement -->
+  <section id="p2" class="card" hidden>
+    <h1>Paiement</h1>
+    <p class="lead">Lien généré. Choisissez votre moyen de paiement.</p>
 
-  <h2>Vérifier un paiement</h2>
-  <form id="status-form">
-    <label for="reference">Référence de transaction DigitalPaye</label>
-    <input id="reference" autocomplete="off" required>
-    <button type="submit">Vérifier le statut</button>
-  </form>
-  <p id="status-result" role="status" aria-live="polite"></p>
+    <div class="summary">
+      <div class="line"><span>Montant</span><b id="s-amount"></b></div>
+      <div class="line"><span>Référence</span><b id="s-ref"></b></div>
+      <div class="line"><span>Valable jusqu'à</span><b id="s-exp"></b></div>
+    </div>
+    <div class="linkbox">
+      <input id="s-link" type="text" readonly aria-label="Lien de paiement">
+      <button id="btnCopy" class="ghost" type="button">Copier</button>
+    </div>
 
-  <hr>
+    <div class="lab">Opérateur</div>
+    <div id="ops" class="ops" role="radiogroup" aria-label="Opérateur"></div>
 
-  <h2>Diagnostic DigitalPaye</h2>
-  <form id="debug-form">
-    <label for="debug-key">Secret webhook</label>
-    <input id="debug-key" type="password" autocomplete="off" required>
-    <button type="submit">Lancer le diagnostic</button>
-  </form>
-  <pre id="debug-result"></pre>
+    <label for="phone">Numéro mobile money</label>
+    <input id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0701020304">
+    <div class="hint">Numéro ivoirien, avec ou sans +225.</div>
 
-  <script>
-    const api = () =>
-      document.querySelector("#worker-url").value.trim().replace(/\/$/, "");
+    <div id="otpBox" hidden>
+      <label for="otp">Code OTP Orange Money</label>
+      <input id="otp" type="text" inputmode="numeric" maxlength="4" autocomplete="one-time-code" placeholder="4 chiffres">
+      <div class="hint">Générez d'abord le code depuis votre compte Orange Money, puis saisissez-le ici.</div>
+    </div>
 
-    const paymentForm = document.querySelector("#payment-form");
-    const result = document.querySelector("#result");
-    const statusResult = document.querySelector("#status-result");
-    const referenceInput = document.querySelector("#reference");
-    const debugResult = document.querySelector("#debug-result");
+    <button id="btnPay" class="primary">Payer</button>
+    <button id="btnRegen" class="ghost" hidden>Générer un nouveau lien</button>
+    <div id="m2" class="msg" role="alert"></div>
+  </section>
 
-    paymentForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      result.textContent = "Création en cours…";
+  <!-- 3 : confirmation -->
+  <section id="p3" class="card" hidden>
+    <div id="state" class="state">
+      <div class="ico" id="ico"><span class="spin"></span></div>
+      <h1 id="stTitle">Vérification…</h1>
+    </div>
+    <p id="stText" class="lead"></p>
 
-      try {
-        const response = await fetch(`${api()}/api/payment-links`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            amount: Number(document.querySelector("#amount").value),
-            label: document.querySelector("#label").value.trim()
-          })
-        });
+    <div id="receipt" class="summary" hidden>
+      <div class="line"><span>Montant</span><b id="r-amount"></b></div>
+      <div class="line"><span>Frais</span><b id="r-fee"></b></div>
+      <div class="line"><span>Référence</span><b id="r-ref"></b></div>
+      <div class="line"><span>Date</span><b id="r-date"></b></div>
+    </div>
 
-        const data = await response.json();
+    <button id="btnVerify" class="primary">Vérifier le paiement</button>
+    <div class="row2">
+      <button id="btnPrint" class="ghost" hidden>Imprimer le reçu</button>
+      <button id="btnNew" class="ghost" hidden>Nouvelle cotisation</button>
+    </div>
+    <div id="m3" class="msg" role="status" aria-live="polite"></div>
+  </section>
 
-        if (!response.ok) {
-          throw new Error(
-            `${data.error || "Création du lien impossible"} (HTTP ${response.status})` +
-            (data.message ? ` : ${data.message}` : "") +
-            (data.details ? ` : ${JSON.stringify(data.details)}` : "")
-          );
-        }
+  <footer>Paiement sécurisé par DigitalPaye</footer>
+</main>
 
-        const paymentLink = findLink(data);
-        const reference = findReference(data);
+<script>
+const API_BASE = "https://digital-paye.billionsjonnhy.workers.dev";
+const IS_FORM = true; // page unique (vos pages paiement/succes.html et echec.html restent inchangées)
+const HOME_URL = location.pathname;
 
-        result.replaceChildren();
+const OP_COLORS = { ORANGE: "#ff7900", WAVE: "#1dc8ff", MTN: "#ffcc00", FLOOZ: "#0a5ca8" };
+const QUICK = [1000, 2000, 5000, 10000];
+const POLL_MS = 4000, POLL_MAX = 40;
 
-        if (paymentLink) {
-          const anchor = document.createElement("a");
-          anchor.href = paymentLink;
-          anchor.textContent = paymentLink;
-          anchor.target = "_blank";
-          anchor.rel = "noopener noreferrer";
-          result.append("Lien créé : ", anchor);
-        }
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => new Intl.NumberFormat("fr-FR").format(n) + " XOF";
+let cfg = null, tx = null, poll = null, finished = false;
+// tx = { ticket, external_ref, amount, link_url, expires_at, reference }
 
-        if (reference) {
-          result.append(
-            document.createElement("br"),
-            `Référence de transaction : ${reference}`
-          );
-          referenceInput.value = reference;
-          statusResult.textContent =
-            "Référence copiée. Tu peux vérifier le statut du paiement.";
-        } else {
-          const note = document.createElement("p");
-          note.textContent =
-            "La réponse de création ne contient pas de référence de transaction. Après le paiement, saisis ici la valeur transaction.reference reçue par webhook.";
-          result.append(note);
-        }
-      } catch (error) {
-        result.textContent = error.message;
-      }
+const store = {
+  get() { try { return JSON.parse(localStorage.getItem("starky_cot")); } catch { return null; } },
+  set(v) { try { v ? localStorage.setItem("starky_cot", JSON.stringify(v)) : localStorage.removeItem("starky_cot"); } catch {} },
+};
+
+async function api(path, opts = {}) {
+  let res;
+  try {
+    res = await fetch(API_BASE + path, { ...opts, headers: { "Content-Type": "application/json" }, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  } catch {
+    throw Object.assign(new Error("Connexion impossible. Vérifiez votre réseau."), { status: 0 });
+  }
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) throw Object.assign(new Error(json.message || `Erreur ${res.status}`), { status: res.status, data: json });
+  return json;
+}
+
+function msg(id, text, kind = "") {
+  const el = $(id);
+  el.textContent = text || "";
+  el.className = "msg" + (text ? " show " + kind : "");
+}
+const busy = (btn, on, label) => { btn.disabled = on; if (label) btn.textContent = label; };
+const errText = (e) => e.message + (e.data?.retry_after ? ` (réessayez dans ${e.data.retry_after} s)` : "");
+
+function go(step) {
+  ["p1", "p2", "p3"].forEach((id, i) => $(id).hidden = i + 1 !== step);
+  ["st1", "st2", "st3"].forEach((id, i) => { $(id).className = i + 1 === step ? "on" : i + 1 < step ? "done" : ""; });
+}
+
+/* ---------- init ---------- */
+async function init() {
+  QUICK.forEach((v) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip"; b.textContent = new Intl.NumberFormat("fr-FR").format(v);
+    b.onclick = () => { $("amount").value = v; };
+    $("chips").appendChild(b);
+  });
+
+  try {
+    cfg = (await api("/api/config")).data;
+    $("env").hidden = cfg.mode === "live";
+    $("amount").min = cfg.min_amount;
+    cfg.operators.forEach((o, i) => {
+      const w = document.createElement("div"); w.className = "op";
+      const inp = document.createElement("input"); inp.type = "radio"; inp.name = "op"; inp.value = o.code; inp.id = "op-" + o.code; if (i === 0) inp.checked = true;
+      const lab = document.createElement("label"); lab.htmlFor = inp.id;
+      const dot = document.createElement("span"); dot.className = "dot"; dot.style.background = OP_COLORS[o.code] || "var(--mute)";
+      lab.append(dot, document.createTextNode(o.label));
+      w.append(inp, lab); $("ops").appendChild(w);
     });
+    $("ops").addEventListener("change", syncOp); syncOp();
+  } catch (e) { msg("m1", "Service indisponible : " + e.message, "err"); }
 
-    document.querySelector("#status-form").addEventListener("submit", async (event) => {
-      event.preventDefault();
+  await resume();
+}
 
-      const reference = referenceInput.value.trim();
-      statusResult.textContent = "Vérification en cours…";
+function opInfo() {
+  const code = document.querySelector("input[name=op]:checked")?.value;
+  return cfg?.operators.find((o) => o.code === code);
+}
+function syncOp() { $("otpBox").hidden = !opInfo()?.needs_otp; }
 
-      try {
-        const response = await fetch(
-          `${api()}/api/payments/${encodeURIComponent(reference)}`
-        );
-        const data = await response.json();
+/* ---------- reprise (retour Wave / rechargement) ---------- */
+async function resume() {
+  const flag = new URLSearchParams(location.search).get("pay"); // success | error
+  const saved = store.get();
+  if (flag) history.replaceState(null, "", location.pathname);
+  if (!saved?.ticket) {
+    if (!IS_FORM) return orphan();
+    go(1); if (flag) msg("m1", "Aucune cotisation en cours. Commencez par saisir un montant.", "wait"); return;
+  }
+  tx = saved; renderSummary();
+  if (!tx.reference) { if (!IS_FORM) return location.replace(HOME_URL); go(2); return; }
+  go(3); resetResult();
+  setState("wait", "Vérification…", flag === "error" ? "Le retour indique un échec, nous vérifions auprès de l'opérateur." : "Nous vérifions votre paiement.");
+  await verify(false);
+  if (!finished) startPolling();
+}
 
-        if (!response.ok) {
-          throw new Error(
-            `${data.error || "Vérification impossible"} (HTTP ${response.status})` +
-            (data.message ? ` : ${data.message}` : "")
-          );
-        }
+function orphan() {
+  go(3); resetResult();
+  setState("ko", "Aucune cotisation en cours", "Nous ne retrouvons pas votre paiement sur cet appareil. Si vous venez de payer, il sera visible chez votre opérateur ; sinon, recommencez.");
+  $("btnVerify").hidden = true; $("btnNew").hidden = false; $("btnNew").textContent = "Faire une cotisation";
+}
 
-        const labels = {
-          successful: "Paiement confirmé",
-          failed: "Paiement échoué",
-          cancelled: "Paiement annulé",
-          pending: "En attente du webhook de DigitalPaye"
-        };
+function renderSummary() {
+  $("s-amount").textContent = fmt(tx.amount);
+  $("s-ref").textContent = tx.external_ref;
+  $("s-link").value = tx.link_url || "";
+  $("btnCopy").hidden = !tx.link_url;
+  $("s-exp").textContent = tx.expires_at ? new Date(tx.expires_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "—";
+  const expired = tx.expires_at && Date.now() > new Date(tx.expires_at).getTime() && !tx.reference;
+  $("btnPay").disabled = !!expired; $("btnRegen").hidden = !expired;
+  if (expired) msg("m2", "Ce lien a expiré. Générez-en un nouveau.", "err"); else msg("m2", "");
+}
 
-        statusResult.textContent =
-          `${labels[data.status] || `Statut reçu : ${data.status || "inconnu"}`} — référence ${reference}`;
-      } catch (error) {
-        statusResult.textContent = error.message;
-      }
-    });
+/* ---------- 1 : lien ---------- */
+$("btnLink").onclick = async () => {
+  const amount = Number($("amount").value);
+  const min = cfg?.min_amount || 100;
+  if (!Number.isInteger(amount) || amount < min) return msg("m1", `Saisissez un montant entier d'au moins ${min} XOF.`, "err");
+  if (cfg && amount > cfg.max_amount) return msg("m1", `Montant maximum : ${fmt(cfg.max_amount)}.`, "err");
+  busy($("btnLink"), true, "Génération…"); msg("m1", "");
+  try {
+    const d = (await api("/api/payment-links", { method: "POST", body: { amount, member_name: $("name").value, label: "Cotisation" } })).data;
+    tx = { ticket: d.ticket, external_ref: d.external_ref, amount: d.amount, link_url: d.link_url, expires_at: d.expires_at };
+    store.set(tx); renderSummary(); go(2);
+  } catch (e) { msg("m1", errText(e), "err"); }
+  finally { busy($("btnLink"), false, "Générer le lien de paiement"); }
+};
 
-    document.querySelector("#debug-form").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      debugResult.textContent = "Diagnostic en cours…";
+$("btnCopy").onclick = async () => {
+  try { await navigator.clipboard.writeText(tx.link_url); $("btnCopy").textContent = "Copié ✓"; }
+  catch { $("s-link").select(); $("btnCopy").textContent = "Sélectionné"; }
+  setTimeout(() => $("btnCopy").textContent = "Copier", 1800);
+};
 
-      try {
-        const response = await fetch(`${api()}/api/debug-auth`, {
-          headers: {
-            "X-Debug-Key": document.querySelector("#debug-key").value
-          }
-        });
+/* ---------- 2 : paiement ---------- */
+$("btnPay").onclick = async () => {
+  const op = opInfo();
+  const phone = $("phone").value.trim(), otp = $("otp").value.trim();
+  if (!phone) return msg("m2", "Saisissez votre numéro mobile money.", "err");
+  if (op?.needs_otp && !/^\d{4}$/.test(otp)) return msg("m2", "Saisissez le code OTP Orange Money à 4 chiffres.", "err");
+  busy($("btnPay"), true, "Envoi…"); msg("m2", "");
+  try {
+    const r = await api("/api/pay", { method: "POST", body: { ticket: tx.ticket, operator: op.code, phone, otp, first_name: ($("name").value || "").split(" ")[0] } });
+    tx.reference = r.data.reference; store.set(tx);          // sauvegardé AVANT la redirection Wave
+    if (r.data.next === "redirect" && r.data.redirect_url) { msg("m2", "Redirection vers Wave…", "wait"); location.href = r.data.redirect_url; return; }
+    finished = false; resetResult(); go(3);
+    setState("wait", op.needs_otp ? "Validation en cours…" : "Validez sur votre téléphone", r.message);
+    startPolling();
+  } catch (e) {
+    if (e.status === 410) $("btnRegen").hidden = false;
+    msg("m2", errText(e), "err");
+  } finally { busy($("btnPay"), false, "Payer"); }
+};
+$("btnRegen").onclick = reset;
 
-        debugResult.textContent =
-          JSON.stringify(await response.json(), null, 2);
-      } catch (error) {
-        debugResult.textContent = `Diagnostic impossible : ${error.message}`;
-      }
-    });
+/* ---------- 3 : confirmation ---------- */
+function resetResult() {
+  $("receipt").hidden = true; $("btnPrint").hidden = true; $("btnNew").hidden = true;
+  $("btnNew").textContent = "Nouvelle cotisation"; $("btnNew").onclick = reset;
+  $("btnVerify").hidden = false; msg("m3", "");
+}
+function setState(kind, title, text) {
+  $("state").className = "state " + (kind === "ok" ? "ok" : kind === "ko" ? "ko" : "");
+  $("ico").innerHTML = kind === "ok" ? "✓" : kind === "ko" ? "✕" : '<span class="spin"></span>';
+  $("stTitle").textContent = title; $("stText").textContent = text || "";
+}
 
-    function findLink(value) {
-      if (Array.isArray(value)) {
-        return value.map(findLink).find(Boolean);
-      }
+async function verify(manual) {
+  if (!tx?.reference || finished) return;
+  if (manual) busy($("btnVerify"), true, "Vérification…");
+  try {
+    const d = (await api(`/api/verify/${encodeURIComponent(tx.reference)}?ticket=${encodeURIComponent(tx.ticket)}`)).data;
+    if (d.confirmed) return success(d);
+    if (d.status === "failed") return failure(d.failure_reason);
+    if (d.amount_mismatch) { stopPolling(); setState("ko", "Vérification requise", "Le montant reçu ne correspond pas. Contactez-nous avec la référence " + d.reference + "."); return; }
+    setState("wait", d.status === "initiated" ? "En attente de validation" : "En cours…", "Validez le paiement sur votre téléphone si ce n'est pas déjà fait.");
+    if (manual) msg("m3", "Pas encore confirmé. Réessayez dans quelques secondes.", "wait");
+  } catch (e) { msg("m3", errText(e), "err"); }
+  finally { if (manual) busy($("btnVerify"), false, "Vérifier le paiement"); }
+}
 
-      if (value && typeof value === "object") {
-        for (const [key, child] of Object.entries(value)) {
-          if (
-            typeof child === "string" &&
-            /(url|link)/i.test(key) &&
-            /^https:\/\//i.test(child)
-          ) {
-            return child;
-          }
-        }
+function success(d) {
+  finished = true; stopPolling(); store.set(null);
+  setState("ok", "Paiement confirmé", "Merci pour votre cotisation.");
+  $("r-amount").textContent = fmt(d.amount ?? tx.amount);
+  $("r-fee").textContent = d.fee != null ? fmt(d.fee) : "—";
+  $("r-ref").textContent = d.reference;
+  $("r-date").textContent = new Date().toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short" });
+  $("receipt").hidden = false; $("btnVerify").hidden = true; $("btnPrint").hidden = false; $("btnNew").hidden = false; msg("m3", "");
+}
 
-        for (const child of Object.values(value)) {
-          const found = findLink(child);
-          if (found) return found;
-        }
-      }
+function failure(reason) {
+  finished = true; stopPolling();
+  setState("ko", "Paiement échoué", reason || "L'opérateur a refusé la transaction.");
+  $("btnVerify").hidden = true; $("btnNew").hidden = false; $("btnNew").textContent = "Réessayer";
+  $("btnNew").onclick = () => { delete tx.reference; store.set(tx); if (!IS_FORM) { location.href = HOME_URL; return; } finished = false; resetResult(); renderSummary(); go(2); };
+}
 
-      return undefined;
-    }
+function startPolling() {
+  stopPolling(); let n = 0;
+  poll = setInterval(() => {
+    if (++n > POLL_MAX) { stopPolling(); setState("wait", "Toujours en attente", "Pas encore de confirmation. Utilisez « Vérifier le paiement »."); return; }
+    verify(false);
+  }, POLL_MS);
+}
+function stopPolling() { clearInterval(poll); poll = null; }
 
-    function findReference(value) {
-      if (!value || typeof value !== "object") {
-        return undefined;
-      }
+function reset() { store.set(null); if (!IS_FORM) { location.href = HOME_URL; return; } history.replaceState(null, "", location.pathname); location.reload(); }
 
-      // Prend uniquement le champ reference, jamais le champ id.
-      if (
-        Object.prototype.hasOwnProperty.call(value, "reference") &&
-        value.reference != null &&
-        typeof value.reference !== "object"
-      ) {
-        return String(value.reference);
-      }
+$("btnVerify").onclick = () => verify(true);
+$("btnPrint").onclick = () => window.print();
 
-      for (const child of Object.values(value)) {
-        const found = findReference(child);
-        if (found) return found;
-      }
-
-      return undefined;
-    }
-  </script>
+init();
+</script>
 </body>
 </html>
