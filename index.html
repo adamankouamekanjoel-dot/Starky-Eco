@@ -297,16 +297,21 @@ async function init() {
   await resume();
 }
 
+// Numéros de test (mode démo) : ceux du worker + ceux que DigitalPaye indique dans ses erreurs, filtrés par opérateur
+let testList = [];
 function showTestNumbers(list) {
-  if (!Array.isArray(list) || !list.length) return;
-  $("testBox").hidden = false;
-  list.forEach((n) => {
+  (list || []).forEach((n) => { if (!testList.some((x) => x.phone === n.phone && (x.operator || "") === (n.operator || ""))) testList.push(n); });
+  renderTest();
+}
+function renderTest() {
+  const code = opInfo()?.code;
+  const items = testList.filter((n) => !n.operator || String(n.operator).toUpperCase() === code);
+  $("testBox").hidden = !items.length;
+  $("testChips").innerHTML = "";
+  items.forEach((n) => {
     const b = document.createElement("button");
     b.type = "button"; b.className = "chip"; b.textContent = n.phone + (n.note ? " · " + n.note : "");
-    b.onclick = () => {
-      $("phone").value = n.phone;
-      if (n.operator) { const r = document.getElementById("op-" + String(n.operator).toUpperCase()); if (r) { r.checked = true; syncOp(); } }
-    };
+    b.onclick = () => { $("phone").value = n.phone; };
     $("testChips").appendChild(b);
   });
 }
@@ -321,7 +326,7 @@ $("phone").addEventListener("input", () => {
   $("phone").value = v.slice(0, 10);
 });
 
-function syncOp() { $("otpBox").hidden = !opInfo()?.needs_otp; }
+function syncOp() { $("otpBox").hidden = !opInfo()?.needs_otp; renderTest(); }
 
 /* ---------- reprise (retour Wave / rechargement) ---------- */
 async function resume() {
@@ -419,6 +424,7 @@ $("btnPay").onclick = async () => {
     startPolling();
   } catch (e) {
     if (e.status === 410) $("btnRegen").hidden = false;
+    if (e.data?.test_numbers?.length) showTestNumbers(e.data.test_numbers.map((p) => ({ phone: p, operator: e.data.operator })));
     msg("m2", errText(e), "err");
   } finally { busy($("btnPay"), false, "Payer"); }
 };
