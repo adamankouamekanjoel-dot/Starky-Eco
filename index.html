@@ -252,8 +252,22 @@ function go(step) {
   ["st1", "st2", "st3"].forEach((id, i) => { $(id).className = i + 1 === cur ? "on" : i + 1 < cur ? "done" : ""; });
 }
 
-const isExpired = (t) => !!t?.expires_at && Date.now() > new Date(t.expires_at).getTime();
-const minutesLeft = (t) => Math.max(0, Math.ceil((new Date(t.expires_at).getTime() - Date.now()) / 60000));
+const ttlMs = () => (cfg?.link_ttl_minutes || 60) * 60000;
+// Un lien est valable 60 min depuis sa création. Un lien sans date de création (ancienne version, 24 h) est considéré expiré.
+const expiryMs = (t) => {
+  const created = Number(t?.created_at);
+  if (!created) return 0;
+  const server = t.expires_at ? new Date(t.expires_at).getTime() : Infinity;
+  return Math.min(created + ttlMs(), server);
+};
+const isExpired = (t) => Date.now() >= expiryMs(t);
+const minutesLeft = (t) => Math.max(0, Math.ceil((expiryMs(t) - Date.now()) / 60000));
+
+// Archive le lien chez DigitalPaye (sans attendre, sans bloquer l'interface)
+function cancelLink(t) {
+  if (!t?.ticket || t.reference) return;
+  try { fetch(API_BASE + "/api/payment-links/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ticket: t.ticket }), keepalive: true }).catch(() => {}); } catch {}
+}
 
 /* ---------- init ---------- */
 async function init() {
@@ -319,16 +333,23 @@ async function resume() {
 
   // Paiement déjà lancé : on vérifie son état avant tout
   if (tx.reference) {
+    const stale = isExpired(tx);
     renderSummary(); go(3); resetResult();
     setState("wait", "Vérification…", flag === "error" ? "Le retour indique un échec, nous vérifions auprès de l'opérateur." : "Nous vérifions votre paiement.");
     await verify(false);
-    if (!finished) startPolling();
+    if (finished) return;
+    if (stale) {   // lien périmé et paiement non abouti : on n'insiste pas
+      stopPolling(); store.set(null); tx = null; go(1);
+      msg("m1", "Le paiement précédent n'a pas abouti et son lien a expiré. Commencez une nouvelle cotisation.", "wait");
+      return;
+    }
+    startPolling();
     return;
   }
 
-  // Lien généré mais pas payé : on ne garde que le dernier, et seulement s'il est encore valable (60 min)
+  // Lien généré mais pas payé : on ne garde que le dernier, et seulement s'il a moins de 60 min
   if (isExpired(tx)) {
-    store.set(null); tx = null; go(1);
+    cancelLink(tx); store.set(null); tx = null; go(1);
     msg("m1", "Votre dernier lien a expiré. Générez-en un nouveau.", "wait");
     return;
   }
@@ -339,7 +360,7 @@ async function resume() {
 }
 
 $("btnContinue").onclick = () => { renderSummary(); go(2); };
-$("btnFresh").onclick = () => { store.set(null); tx = null; go(1); };
+$("btnFresh").onclick = () => { cancelLink(tx); store.set(null); tx = null; go(1); };
 
 function orphan() {
   go(3); resetResult();
@@ -350,13 +371,13 @@ function orphan() {
 let expTimer = null;
 function renderSummary() {
   clearTimeout(expTimer);
-  if (tx.expires_at && !tx.reference && !isExpired(tx)) expTimer = setTimeout(renderSummary, Math.min(new Date(tx.expires_at).getTime() - Date.now() + 500, 2147000000));
+  if (!tx.reference && !isExpired(tx)) expTimer = setTimeout(renderSummary, expiryMs(tx) - Date.now() + 500);
   $("s-amount").textContent = fmt(tx.amount);
   $("s-ref").textContent = tx.external_ref;
   $("s-link").value = tx.link_url || "";
   $("btnCopy").hidden = !tx.link_url;
-  $("s-exp").textContent = tx.expires_at ? new Date(tx.expires_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "—";
-  const expired = tx.expires_at && Date.now() > new Date(tx.expires_at).getTime() && !tx.reference;
+  $("s-exp").textContent = expiryMs(tx) ? new Date(expiryMs(tx)).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "—";
+  const expired = !tx.reference && isExpired(tx);
   $("btnPay").disabled = !!expired; $("btnRegen").hidden = !expired;
   if (expired) msg("m2", "Ce lien a expiré. Générez-en un nouveau.", "err"); else msg("m2", "");
 }
@@ -370,7 +391,7 @@ $("btnLink").onclick = async () => {
   busy($("btnLink"), true, "Génération…"); msg("m1", "");
   try {
     const d = (await api("/api/payment-links", { method: "POST", body: { amount, member_name: $("name").value, label: "Cotisation" } })).data;
-    tx = { ticket: d.ticket, external_ref: d.external_ref, amount: d.amount, link_url: d.link_url, expires_at: d.expires_at };
+    tx = { ticket: d.ticket, external_ref: d.external_ref, amount: d.amount, link_url: d.link_url, expires_at: d.expires_at, created_at: Date.now() };
     store.set(tx); renderSummary(); go(2);
   } catch (e) { msg("m1", errText(e), "err"); }
   finally { busy($("btnLink"), false, "Générer le lien de paiement"); }
@@ -455,7 +476,7 @@ function startPolling() {
 }
 function stopPolling() { clearInterval(poll); poll = null; }
 
-function reset() { store.set(null); if (!IS_FORM) { location.href = HOME_URL; return; } history.replaceState(null, "", location.pathname); location.reload(); }
+function reset() { cancelLink(tx); store.set(null); if (!IS_FORM) { location.href = HOME_URL; return; } history.replaceState(null, "", location.pathname); location.reload(); }
 
 $("btnVerify").onclick = () => verify(true);
 $("btnPrint").onclick = () => window.print();
