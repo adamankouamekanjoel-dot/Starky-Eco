@@ -58,6 +58,10 @@
   .op label{margin:0;display:flex;align-items:center;gap:10px;padding:12px;border:1.5px solid var(--line);border-radius:10px;font-weight:600;font-size:14px;cursor:pointer}
   .op input:checked + label{border-color:var(--accent);background:var(--accent-soft)}
   .op input:focus-visible + label{outline:3px solid color-mix(in srgb,var(--accent) 55%,transparent);outline-offset:2px}
+  .testbox{margin-top:10px;padding:10px 12px;border:1px dashed var(--warn);border-radius:10px;background:var(--warn-soft)}
+  .testbox .lab{margin:0 0 6px;color:var(--warn)}
+  .testbox .chips{margin-top:0}
+  .testbox .chip{border-color:color-mix(in srgb,var(--warn) 50%,transparent)}
   .dot{width:12px;height:12px;border-radius:50%;flex:none}
 
   button.primary,button.ghost{font:inherit;font-weight:700;font-size:16px;width:100%;margin-top:18px;padding:14px 16px;border-radius:10px;cursor:pointer;border:1.5px solid transparent}
@@ -107,6 +111,19 @@
     <li id="st3">3. Confirmation</li>
   </ol>
 
+  <!-- 0 : cotisation en cours -->
+  <section id="p0" class="card" hidden>
+    <h1>Cotisation en cours</h1>
+    <p class="lead">Vous avez un lien de paiement qui n'a pas encore été payé.</p>
+    <div class="summary">
+      <div class="line"><span>Montant</span><b id="c-amount"></b></div>
+      <div class="line"><span>Référence</span><b id="c-ref"></b></div>
+      <div class="line"><span>Temps restant</span><b id="c-left"></b></div>
+    </div>
+    <button id="btnContinue" class="primary">Poursuivre le paiement</button>
+    <button id="btnFresh" class="ghost">Nouvelle cotisation</button>
+  </section>
+
   <!-- 1 : montant -->
   <section id="p1" class="card">
     <h1>Montant de la cotisation</h1>
@@ -145,8 +162,12 @@
     <div id="ops" class="ops" role="radiogroup" aria-label="Opérateur"></div>
 
     <label for="phone">Numéro mobile money</label>
-    <input id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0701020304">
-    <div class="hint">Numéro ivoirien, avec ou sans +225.</div>
+    <input id="phone" type="tel" inputmode="numeric" maxlength="10" autocomplete="tel-national" placeholder="0701020304">
+    <div class="hint">10 chiffres, sans indicatif.</div>
+    <div id="testBox" class="testbox" hidden>
+      <div class="lab">Mode démo : numéros autorisés</div>
+      <div id="testChips" class="chips"></div>
+    </div>
 
     <div id="otpBox" hidden>
       <label for="otp">Code OTP Orange Money</label>
@@ -225,9 +246,14 @@ const busy = (btn, on, label) => { btn.disabled = on; if (label) btn.textContent
 const errText = (e) => e.message + (e.data?.retry_after ? ` (réessayez dans ${e.data.retry_after} s)` : "");
 
 function go(step) {
+  $("p0").hidden = step !== 0;
   ["p1", "p2", "p3"].forEach((id, i) => $(id).hidden = i + 1 !== step);
-  ["st1", "st2", "st3"].forEach((id, i) => { $(id).className = i + 1 === step ? "on" : i + 1 < step ? "done" : ""; });
+  const cur = step === 0 ? 1 : step;
+  ["st1", "st2", "st3"].forEach((id, i) => { $(id).className = i + 1 === cur ? "on" : i + 1 < cur ? "done" : ""; });
 }
+
+const isExpired = (t) => !!t?.expires_at && Date.now() > new Date(t.expires_at).getTime();
+const minutesLeft = (t) => Math.max(0, Math.ceil((new Date(t.expires_at).getTime() - Date.now()) / 60000));
 
 /* ---------- init ---------- */
 async function init() {
@@ -251,15 +277,36 @@ async function init() {
       w.append(inp, lab); $("ops").appendChild(w);
     });
     $("ops").addEventListener("change", syncOp); syncOp();
+    showTestNumbers(cfg.test_numbers);
   } catch (e) { msg("m1", "Service indisponible : " + e.message, "err"); }
 
   await resume();
+}
+
+function showTestNumbers(list) {
+  if (!Array.isArray(list) || !list.length) return;
+  $("testBox").hidden = false;
+  list.forEach((n) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip"; b.textContent = n.phone + (n.note ? " · " + n.note : "");
+    b.onclick = () => {
+      $("phone").value = n.phone;
+      if (n.operator) { const r = document.getElementById("op-" + String(n.operator).toUpperCase()); if (r) { r.checked = true; syncOp(); } }
+    };
+    $("testChips").appendChild(b);
+  });
 }
 
 function opInfo() {
   const code = document.querySelector("input[name=op]:checked")?.value;
   return cfg?.operators.find((o) => o.code === code);
 }
+$("phone").addEventListener("input", () => {
+  let v = $("phone").value.replace(/\D/g, "");
+  if (v.startsWith("225") && v.length > 10) v = v.slice(3);
+  $("phone").value = v.slice(0, 10);
+});
+
 function syncOp() { $("otpBox").hidden = !opInfo()?.needs_otp; }
 
 /* ---------- reprise (retour Wave / rechargement) ---------- */
@@ -267,17 +314,32 @@ async function resume() {
   const flag = new URLSearchParams(location.search).get("pay"); // success | error
   const saved = store.get();
   if (flag) history.replaceState(null, "", location.pathname);
-  if (!saved?.ticket) {
-    if (!IS_FORM) return orphan();
-    go(1); if (flag) msg("m1", "Aucune cotisation en cours. Commencez par saisir un montant.", "wait"); return;
+  if (!saved?.ticket) { go(1); return; }
+  tx = saved;
+
+  // Paiement déjà lancé : on vérifie son état avant tout
+  if (tx.reference) {
+    renderSummary(); go(3); resetResult();
+    setState("wait", "Vérification…", flag === "error" ? "Le retour indique un échec, nous vérifions auprès de l'opérateur." : "Nous vérifions votre paiement.");
+    await verify(false);
+    if (!finished) startPolling();
+    return;
   }
-  tx = saved; renderSummary();
-  if (!tx.reference) { if (!IS_FORM) return location.replace(HOME_URL); go(2); return; }
-  go(3); resetResult();
-  setState("wait", "Vérification…", flag === "error" ? "Le retour indique un échec, nous vérifions auprès de l'opérateur." : "Nous vérifions votre paiement.");
-  await verify(false);
-  if (!finished) startPolling();
+
+  // Lien généré mais pas payé : on ne garde que le dernier, et seulement s'il est encore valable (60 min)
+  if (isExpired(tx)) {
+    store.set(null); tx = null; go(1);
+    msg("m1", "Votre dernier lien a expiré. Générez-en un nouveau.", "wait");
+    return;
+  }
+  $("c-amount").textContent = fmt(tx.amount);
+  $("c-ref").textContent = tx.external_ref;
+  $("c-left").textContent = minutesLeft(tx) + " min";
+  go(0);
 }
+
+$("btnContinue").onclick = () => { renderSummary(); go(2); };
+$("btnFresh").onclick = () => { store.set(null); tx = null; go(1); };
 
 function orphan() {
   go(3); resetResult();
@@ -285,12 +347,15 @@ function orphan() {
   $("btnVerify").hidden = true; $("btnNew").hidden = false; $("btnNew").textContent = "Faire une cotisation";
 }
 
+let expTimer = null;
 function renderSummary() {
+  clearTimeout(expTimer);
+  if (tx.expires_at && !tx.reference && !isExpired(tx)) expTimer = setTimeout(renderSummary, Math.min(new Date(tx.expires_at).getTime() - Date.now() + 500, 2147000000));
   $("s-amount").textContent = fmt(tx.amount);
   $("s-ref").textContent = tx.external_ref;
   $("s-link").value = tx.link_url || "";
   $("btnCopy").hidden = !tx.link_url;
-  $("s-exp").textContent = tx.expires_at ? new Date(tx.expires_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "—";
+  $("s-exp").textContent = tx.expires_at ? new Date(tx.expires_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "—";
   const expired = tx.expires_at && Date.now() > new Date(tx.expires_at).getTime() && !tx.reference;
   $("btnPay").disabled = !!expired; $("btnRegen").hidden = !expired;
   if (expired) msg("m2", "Ce lien a expiré. Générez-en un nouveau.", "err"); else msg("m2", "");
@@ -378,7 +443,7 @@ function failure(reason) {
   finished = true; stopPolling();
   setState("ko", "Paiement échoué", reason || "L'opérateur a refusé la transaction.");
   $("btnVerify").hidden = true; $("btnNew").hidden = false; $("btnNew").textContent = "Réessayer";
-  $("btnNew").onclick = () => { delete tx.reference; store.set(tx); if (!IS_FORM) { location.href = HOME_URL; return; } finished = false; resetResult(); renderSummary(); go(2); };
+  $("btnNew").onclick = () => { if (isExpired(tx)) return reset(); delete tx.reference; store.set(tx); if (!IS_FORM) { location.href = HOME_URL; return; } finished = false; resetResult(); renderSummary(); go(2); };
 }
 
 function startPolling() {
