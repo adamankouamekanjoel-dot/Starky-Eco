@@ -187,6 +187,7 @@
       <h1 id="stTitle">Vérification…</h1>
     </div>
     <p id="stText" class="lead"></p>
+    <p id="lockNote" class="hint" hidden>Un paiement est en cours de vérification. Vous pourrez lancer une nouvelle cotisation dès qu'il sera confirmé ou refusé. Vous pouvez fermer cette page : la vérification reprendra à votre retour.</p>
 
     <div id="receipt" class="summary" hidden>
       <div class="line"><span>Montant</span><b id="r-amount"></b></div>
@@ -260,6 +261,11 @@ const expiryMs = (t) => {
   const server = t.expires_at ? new Date(t.expires_at).getTime() : Infinity;
   return Math.min(created + ttlMs(), server);
 };
+// Un paiement lancé reste enregistré ici tant que son statut n'est pas tranché ; aucune nouvelle cotisation n'est possible d'ici là.
+const FINAL = new Set(["successful", "failed", "cancelled", "expired", "mismatch"]);
+const isFinal = (st) => FINAL.has(st);
+const hasPending = () => { const p = store.get(); return !!(p?.reference && !isFinal(p.status)); };
+
 const isExpired = (t) => Date.now() >= expiryMs(t);
 const minutesLeft = (t) => Math.max(0, Math.ceil((expiryMs(t) - Date.now()) / 60000));
 
@@ -336,19 +342,12 @@ async function resume() {
   if (!saved?.ticket) { go(1); return; }
   tx = saved;
 
-  // Paiement déjà lancé : on vérifie son état avant tout
+  // Paiement déjà lancé : il reste enregistré tant qu'il n'est pas tranché (réussi, échoué, annulé ou expiré)
   if (tx.reference) {
-    const stale = isExpired(tx);
     renderSummary(); go(3); resetResult();
     setState("wait", "Vérification…", flag === "error" ? "Le retour indique un échec, nous vérifions auprès de l'opérateur." : "Nous vérifions votre paiement.");
     await verify(false);
-    if (finished) return;
-    if (stale) {   // lien périmé et paiement non abouti : on n'insiste pas
-      stopPolling(); store.set(null); tx = null; go(1);
-      msg("m1", "Le paiement précédent n'a pas abouti et son lien a expiré. Commencez une nouvelle cotisation.", "wait");
-      return;
-    }
-    startPolling();
+    if (!finished) startPolling();
     return;
   }
 
@@ -365,7 +364,7 @@ async function resume() {
 }
 
 $("btnContinue").onclick = () => { renderSummary(); go(2); };
-$("btnFresh").onclick = () => { cancelLink(tx); store.set(null); tx = null; go(1); };
+$("btnFresh").onclick = () => { if (hasPending()) return; cancelLink(tx); store.set(null); tx = null; go(1); };
 
 function orphan() {
   go(3); resetResult();
@@ -389,6 +388,7 @@ function renderSummary() {
 
 /* ---------- 1 : lien ---------- */
 $("btnLink").onclick = async () => {
+  if (hasPending()) { msg("m1", "Un paiement précédent n'est pas encore vérifié. Vérification en cours…", "wait"); return resume(); }
   const amount = Number($("amount").value);
   const min = cfg?.min_amount || 100;
   if (!Number.isInteger(amount) || amount < min) return msg("m1", `Saisissez un montant entier d'au moins ${min} XOF.`, "err");
@@ -417,7 +417,7 @@ $("btnPay").onclick = async () => {
   busy($("btnPay"), true, "Envoi…"); msg("m2", "");
   try {
     const r = await api("/api/pay", { method: "POST", body: { ticket: tx.ticket, operator: op.code, phone, otp, first_name: ($("name").value || "").split(" ")[0] } });
-    tx.reference = r.data.reference; store.set(tx);          // sauvegardé AVANT la redirection Wave
+    tx.reference = r.data.reference; tx.status = r.data.status || "initiated"; tx.verified_at = null; store.set(tx);          // sauvegardé AVANT la redirection Wave
     if (r.data.next === "redirect" && r.data.redirect_url) { msg("m2", "Redirection vers Wave…", "wait"); location.href = r.data.redirect_url; return; }
     finished = false; resetResult(); go(3);
     setState("wait", op.needs_otp ? "Validation en cours…" : "Validez sur votre téléphone", r.message);
@@ -440,6 +440,7 @@ function setState(kind, title, text) {
   $("state").className = "state " + (kind === "ok" ? "ok" : kind === "ko" ? "ko" : "");
   $("ico").innerHTML = kind === "ok" ? "✓" : kind === "ko" ? "✕" : '<span class="spin"></span>';
   $("stTitle").textContent = title; $("stText").textContent = text || "";
+  $("lockNote").hidden = kind !== "wait";
 }
 
 async function verify(manual) {
@@ -447,9 +448,15 @@ async function verify(manual) {
   if (manual) busy($("btnVerify"), true, "Vérification…");
   try {
     const d = (await api(`/api/verify/${encodeURIComponent(tx.reference)}?ticket=${encodeURIComponent(tx.ticket)}`)).data;
+    tx.status = d.confirmed ? "successful" : d.amount_mismatch ? "mismatch" : d.status; tx.verified_at = Date.now();
+    if (!d.confirmed) store.set(tx);               // statut conservé : un paiement non tranché bloque toute nouvelle cotisation
     if (d.confirmed) return success(d);
-    if (d.status === "failed") return failure(d.failure_reason);
-    if (d.amount_mismatch) { stopPolling(); setState("ko", "Vérification requise", "Le montant reçu ne correspond pas. Contactez-nous avec la référence " + d.reference + "."); return; }
+    if (d.amount_mismatch) {
+      finished = true; stopPolling();
+      setState("ko", "Vérification requise", "Le montant reçu ne correspond pas. Contactez-nous avec la référence " + d.reference + ".");
+      $("btnVerify").hidden = true; $("btnNew").hidden = false; return;
+    }
+    if (isFinal(d.status)) return failure(d.failure_reason || (d.status === "expired" ? "Le délai de validation est dépassé." : d.status === "cancelled" ? "Le paiement a été annulé." : ""));
     setState("wait", d.status === "initiated" ? "En attente de validation" : "En cours…", "Validez le paiement sur votre téléphone si ce n'est pas déjà fait.");
     if (manual) msg("m3", "Pas encore confirmé. Réessayez dans quelques secondes.", "wait");
   } catch (e) { msg("m3", errText(e), "err"); }
@@ -469,20 +476,20 @@ function success(d) {
 function failure(reason) {
   finished = true; stopPolling();
   setState("ko", "Paiement échoué", reason || "L'opérateur a refusé la transaction.");
-  $("btnVerify").hidden = true; $("btnNew").hidden = false; $("btnNew").textContent = "Réessayer";
+  $("btnVerify").hidden = true; $("btnNew").hidden = false; $("btnNew").textContent = isExpired(tx) ? "Nouvelle cotisation" : "Réessayer";
   $("btnNew").onclick = () => { if (isExpired(tx)) return reset(); delete tx.reference; store.set(tx); if (!IS_FORM) { location.href = HOME_URL; return; } finished = false; resetResult(); renderSummary(); go(2); };
 }
 
 function startPolling() {
   stopPolling(); let n = 0;
   poll = setInterval(() => {
-    if (++n > POLL_MAX) { stopPolling(); setState("wait", "Toujours en attente", "Pas encore de confirmation. Utilisez « Vérifier le paiement »."); return; }
+    if (++n > POLL_MAX) { stopPolling(); setState("wait", "Toujours en attente", "Pas encore de confirmation de l'opérateur. Utilisez « Vérifier le paiement » dans quelques instants."); return; }
     verify(false);
   }, POLL_MS);
 }
 function stopPolling() { clearInterval(poll); poll = null; }
 
-function reset() { cancelLink(tx); store.set(null); if (!IS_FORM) { location.href = HOME_URL; return; } history.replaceState(null, "", location.pathname); location.reload(); }
+function reset() { if (hasPending()) return; cancelLink(tx); store.set(null); if (!IS_FORM) { location.href = HOME_URL; return; } history.replaceState(null, "", location.pathname); location.reload(); }
 
 $("btnVerify").onclick = () => verify(true);
 $("btnPrint").onclick = () => window.print();
