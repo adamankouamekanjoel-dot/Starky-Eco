@@ -124,6 +124,21 @@
     <button id="btnFresh" class="ghost">Nouvelle cotisation</button>
   </section>
 
+  <!-- paiement à vérifier -->
+  <section id="pv" class="card" hidden>
+    <h1>Paiement à vérifier</h1>
+    <p class="lead">Un paiement a été lancé mais son résultat n'est pas encore connu.</p>
+    <div class="summary">
+      <div class="line"><span>Montant</span><b id="v-amount"></b></div>
+      <div class="line"><span>Référence</span><b id="v-ref"></b></div>
+      <div class="line"><span>Dernière vérification</span><b id="v-last"></b></div>
+    </div>
+    <button id="btnVerifyNow" class="primary">Poursuivre la vérification</button>
+    <button id="btnRepay" class="ghost">Poursuivre le paiement</button>
+    <div class="hint" style="margin-top:10px">« Poursuivre le paiement » contrôle d'abord le paiement précédent, pour éviter un double débit.</div>
+    <div id="m4" class="msg" role="status" aria-live="polite"></div>
+  </section>
+
   <!-- 1 : montant -->
   <section id="p1" class="card">
     <h1>Montant de la cotisation</h1>
@@ -248,8 +263,9 @@ const errText = (e) => e.message + (e.data?.retry_after ? ` (réessayez dans ${e
 
 function go(step) {
   $("p0").hidden = step !== 0;
+  $("pv").hidden = step !== "v";
   ["p1", "p2", "p3"].forEach((id, i) => $(id).hidden = i + 1 !== step);
-  const cur = step === 0 ? 1 : step;
+  const cur = step === 0 || step === "v" ? 1 : step;
   ["st1", "st2", "st3"].forEach((id, i) => { $(id).className = i + 1 === cur ? "on" : i + 1 < cur ? "done" : ""; });
 }
 
@@ -264,6 +280,7 @@ const expiryMs = (t) => {
 // Un paiement lancé reste enregistré ici tant que son statut n'est pas tranché ; aucune nouvelle cotisation n'est possible d'ici là.
 const FINAL = new Set(["successful", "failed", "cancelled", "expired", "mismatch"]);
 const isFinal = (st) => FINAL.has(st);
+const isPendingPay = (t) => !!(t?.reference && !isFinal(t.status));
 const hasPending = () => { const p = store.get(); return !!(p?.reference && !isFinal(p.status)); };
 
 const isExpired = (t) => Date.now() >= expiryMs(t);
@@ -344,10 +361,9 @@ async function resume() {
 
   // Paiement déjà lancé : il reste enregistré tant qu'il n'est pas tranché (réussi, échoué, annulé ou expiré)
   if (tx.reference) {
-    renderSummary(); go(3); resetResult();
-    setState("wait", "Vérification…", flag === "error" ? "Le retour indique un échec, nous vérifions auprès de l'opérateur." : "Nous vérifions votre paiement.");
-    await verify(false);
-    if (!finished) startPolling();
+    // Paiement non tranché au rechargement de la page : on demande quoi faire (sauf retour de Wave, où l'on vérifie directement)
+    if (isPendingPay(tx) && !flag) { showVerifyChoice(); return; }
+    await startVerification(flag);
     return;
   }
 
@@ -362,6 +378,76 @@ async function resume() {
   $("c-left").textContent = minutesLeft(tx) + " min";
   go(0);
 }
+
+function showVerifyChoice() {
+  $("v-amount").textContent = fmt(tx.amount);
+  $("v-ref").textContent = tx.reference || tx.external_ref;
+  const min = tx.verified_at ? Math.max(0, Math.round((Date.now() - tx.verified_at) / 60000)) : null;
+  $("v-last").textContent = min === null ? "jamais" : min < 1 ? "à l'instant" : "il y a " + min + " min";
+  go("v");
+}
+
+// Poursuivre la vérification : on contrôle l'état du paiement lancé
+$("btnVerifyNow").onclick = async () => {
+  go(3); resetResult(); finished = false;
+  setState("wait", "Vérification…", "Nous vérifions votre paiement.");
+  await verify(false);
+  if (!finished) startPolling();
+};
+
+// Poursuivre le paiement : on contrôle d'abord le paiement précédent ; on ne relance que s'il est tranché sans succès
+$("btnRepay").onclick = async () => {
+  go(3); resetResult(); finished = false;
+  setState("wait", "Vérification…", "Nous contrôlons d'abord le paiement précédent.");
+  await verify(false);
+  if (finished) {
+    if (["failed", "cancelled", "expired"].includes(tx.status) && !isExpired(tx)) {   // échec définitif, lien encore valable : même lien
+      delete tx.reference; delete tx.status; delete tx.verified_at; store.set(tx);
+      finished = false; resetResult(); renderSummary(); go(2);
+      msg("m2", "Le paiement précédent n'a pas abouti. Vous pouvez réessayer avec ce même lien.", "wait");
+    }
+    return;   // réussi, ou échec avec lien périmé : l'écran de résultat est déjà affiché
+  }
+  setState("wait", "Paiement précédent en attente", "Il n'est pas encore terminé. Validez-le sur votre téléphone ou patientez : vous pourrez relancer un paiement dès qu'il sera refusé ou expiré.");
+  startPolling();
+};
+
+// ----- Paiement à vérifier : « Poursuivre la vérification » ou « Poursuivre le paiement » -----
+function showVerifyChoice() {
+  $("v-amount").textContent = fmt(tx.amount);
+  $("v-ref").textContent = tx.external_ref;
+  $("v-last").textContent = tx.verified_at ? new Date(tx.verified_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "pas encore vérifié";
+  msg("m4", "");
+  go("v");
+}
+
+// Envoie directement à l'étape de vérification et la lance
+async function startVerification(flag) {
+  finished = false; renderSummary(); go(3); resetResult();
+  setState("wait", "Vérification…", flag === "error" ? "Le retour indique un échec, nous vérifions auprès de l'opérateur." : "Nous vérifions votre paiement.");
+  await verify(false);
+  if (!finished) startPolling();
+}
+$("btnVerifyNow").onclick = () => startVerification();
+
+// Nouveau paiement : seulement une fois le précédent tranché (contrôle préalable pour éviter un double débit)
+function repayNow() {
+  if (isExpired(tx)) return reset();            // lien périmé : nouvelle cotisation
+  delete tx.reference; delete tx.status; delete tx.verified_at; store.set(tx);
+  finished = false; resetResult(); renderSummary(); go(2);
+}
+$("btnRepay").onclick = async () => {
+  busy($("btnRepay"), true, "Contrôle…"); msg("m4", "");
+  try {
+    const d = (await api(`/api/verify/${encodeURIComponent(tx.reference)}?ticket=${encodeURIComponent(tx.ticket)}`)).data;
+    tx.status = d.confirmed ? "successful" : d.amount_mismatch ? "mismatch" : d.status; tx.verified_at = Date.now(); store.set(tx);
+    if (d.confirmed || d.amount_mismatch) { finished = false; go(3); resetResult(); await verify(false); return; }  // déjà payé : on affiche le résultat
+    if (isFinal(d.status)) return repayNow();
+    $("v-last").textContent = "à l'instant";
+    msg("m4", "Le paiement précédent est toujours en attente. Validez-le sur votre téléphone ou poursuivez la vérification : un nouveau paiement sera possible dès qu'il sera tranché.", "wait");
+  } catch (e) { msg("m4", errText(e), "err"); }
+  finally { busy($("btnRepay"), false, "Poursuivre le paiement"); }
+};
 
 $("btnContinue").onclick = () => { renderSummary(); go(2); };
 $("btnFresh").onclick = () => { if (hasPending()) return; cancelLink(tx); store.set(null); tx = null; go(1); };
@@ -477,7 +563,7 @@ function failure(reason) {
   finished = true; stopPolling();
   setState("ko", "Paiement échoué", reason || "L'opérateur a refusé la transaction.");
   $("btnVerify").hidden = true; $("btnNew").hidden = false; $("btnNew").textContent = isExpired(tx) ? "Nouvelle cotisation" : "Réessayer";
-  $("btnNew").onclick = () => { if (isExpired(tx)) return reset(); delete tx.reference; store.set(tx); if (!IS_FORM) { location.href = HOME_URL; return; } finished = false; resetResult(); renderSummary(); go(2); };
+  $("btnNew").onclick = () => { if (isExpired(tx)) return reset(); delete tx.reference; delete tx.status; delete tx.verified_at; store.set(tx); if (!IS_FORM) { location.href = HOME_URL; return; } finished = false; resetResult(); renderSummary(); go(2); };
 }
 
 function startPolling() {
